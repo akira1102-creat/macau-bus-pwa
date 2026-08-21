@@ -32,7 +32,7 @@ Backend 只接受 catalog 已知的 route，direction 只接受 `0` 或 `1`：
 
 `GET /api/bus/realtime/:route/:direction`
 
-2026-08-21 實測顯示現行官方網站以 `POST https://bis.dsat.gov.mo:37812/macauweb/routestation/bus` 查詢，並按網站 JavaScript 產生 token；原 prompt 中的普通 GET 只視為歷史線索。Client 會跟隨當前網站 protocol、帶官方頁面 Referer，以表單欄位傳 route/direction/token。成功 body 雖為 JSON，Content-Type 實測可能是 `text/html; charset=UTF-8`，因此按 UTF-8 text 讀取再 JSON parse，並要求 application `header === "000"`；HTTP 200 但其他 header code 仍算失敗。每次請求設 4 秒 timeout，限制 response size，以 Zod tolerant parser 驗證最外層結構；未知欄位保留於 development debug raw payload，但 production normalized response 不猜測其含義。
+2026-08-21 實測顯示現行官方網站以 `POST https://bis.dsat.gov.mo:37812/macauweb/routestation/bus` 查詢；原 prompt 中的普通 GET 只視為歷史線索。Form 順序固定為 `action=dy&routeName=<route>&dir=<0|1>&lang=zh-tw&routeType=0&device=web`。Token 依官方 bundle 現行算法產生：對上述未 URL-encode raw form 取 lowercase MD5 `h`，取得本機分鐘 `yyyyMMddHHmm`，組成 `h[0:4] + yyyy + h[4:12] + MMdd + h[12:24] + HHmm + h[24:32]`，並以 `token` request header 發送。Client 會帶官方 route page Referer 與 Origin。成功 body 雖為 JSON，Content-Type 實測可能是 `text/html; charset=UTF-8`，因此按 UTF-8 text 讀取再 JSON parse，並要求 application `header === "000"`；HTTP 200 但其他 header code 仍算失敗。每次請求設 4 秒 timeout，限制 response size，以 Zod tolerant parser 驗證最外層結構；未知欄位保留於 development debug raw payload，但 production normalized response 不猜測其含義。
 
 Normalized response：
 
