@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { TransitCatalog } from '../../shared/transit-contract';
 import { buildServer } from '../app';
+import { REALTIME_RATE_LIMIT_MAX_TRACKED_KEYS } from '../config';
 import { DsatClientError } from '../dsat/dsat-client';
 import { RealtimeRateLimiter } from './realtime';
 
@@ -50,6 +51,17 @@ describe('realtime Fastify routes', () => {
     now += 101;
     limiter.allow('after-expiry');
     expect(limiter.trackedKeyCount).toBeLessThanOrEqual(3);
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 1.5])('falls back safely for invalid maxTrackedKeys=%s', (maxTrackedKeys) => {
+    const limiter = new RealtimeRateLimiter({
+      now: () => 1_000,
+      windowMs: 60_000,
+      maxRequests: 1,
+      maxTrackedKeys,
+    });
+
+    expect(limiter.trackedKeyLimit).toBe(REALTIME_RATE_LIMIT_MAX_TRACKED_KEYS);
   });
 
   it('reports backend health without touching the upstream', async () => {
@@ -207,6 +219,22 @@ describe('realtime Fastify routes', () => {
 
       expect(response.statusCode).toBe(404);
       expect(response.headers['cache-control']).toBe('no-store');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not let NODE_ENV=development override an explicit production config', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(upstreamPayload), { status: 200 }));
+    const app = await createApp({ environment: 'production', fetch: fetcher });
+
+    try {
+      const response = await app.inject({ method: 'GET', url: '/api/debug/dsat/1/0' });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(fetcher).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

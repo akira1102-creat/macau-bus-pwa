@@ -69,7 +69,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   registerHealthRoute(app);
   registerRealtimeRoutes({ app, catalog: catalogRepository, client, cache, now, rateLimiter });
-  if (isDevelopmentEnvironment()) {
+  if (config.environment === 'development' && isDevelopmentEnvironment()) {
     registerDebugRoute({ app, catalog: catalogRepository, client });
   }
   return app;

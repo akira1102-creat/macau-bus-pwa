@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { CatalogRepository } from '../../src/data/catalog-repository';
 import { RealtimeRouteResponseSchema, type DirectionId, type RealtimeRouteResponse } from '../../shared/transit-contract';
+import { REALTIME_RATE_LIMIT_MAX_TRACKED_KEYS } from '../config';
 import { DsatClientError, type DsatClient } from '../dsat/dsat-client';
 import type { RealtimeCache } from '../cache/realtime-cache';
 
@@ -33,11 +34,25 @@ export class RealtimeRateLimiter {
     this.now = options.now ?? (() => Date.now());
     this.windowMs = options.windowMs;
     this.maxRequests = options.maxRequests;
-    this.maxTrackedKeys = Math.max(1, options.maxTrackedKeys ?? 1_000);
+    const requestedMaxTrackedKeys = options.maxTrackedKeys;
+    if (
+      typeof requestedMaxTrackedKeys === 'number'
+      && Number.isFinite(requestedMaxTrackedKeys)
+      && Number.isInteger(requestedMaxTrackedKeys)
+      && requestedMaxTrackedKeys > 0
+    ) {
+      this.maxTrackedKeys = requestedMaxTrackedKeys;
+    } else {
+      this.maxTrackedKeys = REALTIME_RATE_LIMIT_MAX_TRACKED_KEYS;
+    }
   }
 
   get trackedKeyCount(): number {
     return this.states.size;
+  }
+
+  get trackedKeyLimit(): number {
+    return this.maxTrackedKeys;
   }
 
   allow(key: string): boolean {
