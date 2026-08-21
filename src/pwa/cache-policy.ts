@@ -1,5 +1,10 @@
 const OSM_TILE_HOST = 'tile.openstreetmap.org';
 
+export interface PrecacheManifestEntry {
+  url: string;
+  revision: string | null;
+}
+
 function requestUrl(input: string | URL | { url: string }): URL {
   if (typeof input === 'string' || input instanceof URL) {
     return new URL(input, globalThis.location?.href ?? 'http://localhost/');
@@ -14,7 +19,19 @@ function isOsmTileUrl(url: URL): boolean {
 /** API responses and public OSM tiles must never be served from a service-worker cache. */
 export function isNetworkOnlyRequest(input: string | URL | { url: string }): boolean {
   const url = requestUrl(input);
-  return url.pathname.startsWith('/api/') || isOsmTileUrl(url);
+  return url.pathname === '/api' || url.pathname.startsWith('/api/') || isOsmTileUrl(url);
+}
+
+export function getCatalogCacheRevision(
+  manifest: readonly PrecacheManifestEntry[],
+  fallbackRevision: string,
+): string {
+  const catalogEntry = manifest.find((entry) => {
+    const url = new URL(entry.url, 'http://localhost/');
+    return url.pathname === '/data/catalog.json';
+  });
+  const revision = catalogEntry?.revision?.trim();
+  return revision || fallbackRevision;
 }
 
 export function isNavigationRequest(input: { mode?: string }): boolean {

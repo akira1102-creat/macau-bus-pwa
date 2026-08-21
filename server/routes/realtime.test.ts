@@ -73,7 +73,7 @@ describe('realtime Fastify routes', () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.headers['cache-control']).toBe('no-store');
-      expect(response.json()).toEqual({ status: 'ok' });
+      expect(response.json()).toEqual({ status: 'ok', catalogReady: true });
       expect(fetcher).not.toHaveBeenCalled();
     } finally {
       await app.close();

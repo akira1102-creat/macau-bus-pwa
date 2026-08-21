@@ -5,7 +5,12 @@ import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
 import { registerRoute } from 'workbox-routing';
 import { CacheFirst, NetworkFirst, NetworkOnly } from 'workbox-strategies';
 
-import { isCacheFirstAssetRequest, isNavigationRequest, isNetworkOnlyRequest } from './pwa/cache-policy';
+import {
+  getCatalogCacheRevision,
+  isCacheFirstAssetRequest,
+  isNavigationRequest,
+  isNetworkOnlyRequest,
+} from './pwa/cache-policy';
 import { APP_RELEASE } from './pwa/release';
 
 declare const self: ServiceWorkerGlobalScope & {
@@ -15,7 +20,10 @@ declare const self: ServiceWorkerGlobalScope & {
 const CACHE_PREFIX = 'macau-bus-pwa';
 const NAVIGATION_CACHE = `${CACHE_PREFIX}-navigation-${APP_RELEASE}`;
 const ASSET_CACHE = `${CACHE_PREFIX}-assets-${APP_RELEASE}`;
-const CATALOG_CACHE = `${CACHE_PREFIX}-catalog-${APP_RELEASE}`;
+const injectedManifest = self.__WB_MANIFEST ?? [];
+const CATALOG_REVISION = getCatalogCacheRevision(injectedManifest, APP_RELEASE);
+const CATALOG_CACHE = `${CACHE_PREFIX}-catalog-${APP_RELEASE}-${CATALOG_REVISION}`;
+const CURRENT_RUNTIME_CACHES = new Set([NAVIGATION_CACHE, ASSET_CACHE, CATALOG_CACHE]);
 
 async function cacheOfflineShell(): Promise<void> {
   const shellUrls = [
@@ -38,7 +46,7 @@ const offlineShellFallbackPlugin = {
   },
 };
 
-const precacheManifest = (self.__WB_MANIFEST ?? []).filter((entry) => {
+const precacheManifest = injectedManifest.filter((entry) => {
   const url = typeof entry === 'string' ? entry : entry.url;
   const pathname = new URL(url, self.location.origin).pathname;
   return !pathname.endsWith('/index.html') && !pathname.endsWith('/data/catalog.json');
@@ -59,7 +67,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => Promise.all(
       cacheNames
-        .filter((name) => name.startsWith(`${CACHE_PREFIX}-`) && !name.endsWith(APP_RELEASE))
+        .filter((name) => name.startsWith(`${CACHE_PREFIX}-`) && !CURRENT_RUNTIME_CACHES.has(name))
         .map((name) => caches.delete(name)),
     )),
   );

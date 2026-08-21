@@ -6,7 +6,11 @@ export async function startServer(): Promise<void> {
   const port = Number.parseInt(process.env.PORT ?? '3000', 10);
   const host = process.env.HOST ?? '127.0.0.1';
   const distDirectory = fileURLToPath(new URL('../dist/', import.meta.url));
-  const app = buildServer({ staticDir: distDirectory });
+  const catalogPath = process.env.CATALOG_PATH;
+  const app = buildServer({
+    staticDir: distDirectory,
+    ...(catalogPath === undefined ? {} : { catalogPath }),
+  });
   await app.listen({ port: Number.isFinite(port) ? port : 3000, host });
 }
 

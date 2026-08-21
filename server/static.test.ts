@@ -49,7 +49,7 @@ describe('production static integration', () => {
 
     const health = await app.inject({ method: 'GET', url: '/api/health' });
     expect(health.statusCode).toBe(200);
-    expect(health.json()).toEqual({ status: 'ok' });
+    expect(health.json()).toEqual({ status: 'ok', catalogReady: true });
 
     const exactApi = await app.inject({ method: 'GET', url: '/api' });
     expect(exactApi.statusCode).toBe(404);

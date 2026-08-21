@@ -17,7 +17,9 @@ npm run build
 
 `npm run dev` 會同時啟動 Vite（`http://127.0.0.1:5173`）及本機 Fastify API（port 3001），Vite 會把 `/api` 代理到 API process。production 先執行 `npm run build`，再以 `npm run start` 由同一個 Fastify process 提供 `dist/`、SPA fallback 及 `/api`。
 
-PWA release id 為 `macau-bus-pwa-v0.2.1`，並同步出現在 app release、service-worker cache names 及 production worker。Service worker 使用 navigation NetworkFirst、hashed shell／catalog CacheFirst，`/api` 及 OpenStreetMap tiles NetworkOnly；更新會在啟動、pageshow 及重返 visible 時檢查，保留 localStorage／IndexedDB。
+如果 `public/data/catalog.json` 尚未同步或暫時被重新命名，server 仍會啟動並提供 static shell；`/api/health` 會回傳 `catalogReady: false`，需要路線 catalog 的 API 會回傳 503、`no-store` 及 `npm run data:sync` action。可用 `CATALOG_PATH` 指向另一個 catalog 路徑作本機 smoke test。
+
+PWA release id 為 `macau-bus-pwa-v0.2.2`，並同步出現在 app release、service-worker cache names 及 production worker。Service worker 使用 navigation NetworkFirst、hashed shell／catalog CacheFirst，catalog cache 會包含 build-time catalog revision，`/api`（包括 exact `/api`）及 OpenStreetMap tiles NetworkOnly；更新會在啟動、pageshow 及重返 visible 時檢查，保留 localStorage／IndexedDB。
 
 可用以下指令執行完整本機驗證及兩個 viewport 的 Playwright smoke：
 

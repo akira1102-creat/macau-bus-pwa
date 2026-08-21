@@ -5,6 +5,7 @@ import { RealtimeRouteResponseSchema, type DirectionId, type RealtimeRouteRespon
 import { REALTIME_RATE_LIMIT_MAX_TRACKED_KEYS } from '../config';
 import { DsatClientError, type DsatClient } from '../dsat/dsat-client';
 import type { RealtimeCache } from '../cache/realtime-cache';
+import { sendCatalogUnavailable } from '../catalog-status';
 
 interface RealtimeParams {
   route: string;
@@ -87,7 +88,8 @@ export class RealtimeRateLimiter {
 
 export interface RegisterRealtimeRoutesOptions {
   app: FastifyInstance;
-  catalog: CatalogRepository;
+  catalog?: CatalogRepository | undefined;
+  catalogReady?: boolean;
   client: DsatClient;
   cache: RealtimeCache<RealtimeRouteResponse>;
   now?: () => Date;
@@ -122,6 +124,9 @@ export function registerRealtimeRoutes(options: RegisterRealtimeRoutesOptions): 
     '/api/bus/realtime/:route/:direction',
     async (request: FastifyRequest<{ Params: RealtimeParams }>, reply: FastifyReply) => {
       reply.header('Cache-Control', 'no-store');
+      if (options.catalogReady === false || !options.catalog) {
+        return sendCatalogUnavailable(reply);
+      }
       if (!options.rateLimiter.allow(request.ip)) {
         return sendError(reply, 429, 'rate-limit-exceeded');
       }

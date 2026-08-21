@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { CatalogRepository } from '../../src/data/catalog-repository';
 import type { DirectionId } from '../../shared/transit-contract';
 import { DsatClientError, type DsatClient } from '../dsat/dsat-client';
+import { sendCatalogUnavailable } from '../catalog-status';
 
 interface DebugParams {
   route: string;
@@ -11,7 +12,8 @@ interface DebugParams {
 
 export interface RegisterDebugRouteOptions {
   app: FastifyInstance;
-  catalog: CatalogRepository;
+  catalog?: CatalogRepository | undefined;
+  catalogReady?: boolean;
   client: DsatClient;
 }
 
@@ -45,6 +47,9 @@ export function registerDebugRoute(options: RegisterDebugRouteOptions): void {
     '/api/debug/dsat/:route/:direction',
     async (request: FastifyRequest<{ Params: DebugParams }>, reply: FastifyReply) => {
       reply.header('Cache-Control', 'no-store');
+      if (options.catalogReady === false || !options.catalog) {
+        return sendCatalogUnavailable(reply);
+      }
       const route = request.params.route.trim();
       const direction = parseDirection(request.params.direction);
       if (direction === undefined) {

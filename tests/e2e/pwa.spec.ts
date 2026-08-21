@@ -35,7 +35,7 @@ test.describe('PWA release surface', () => {
     expect(worker).toContain('clients.claim');
     expect(worker).toContain('NetworkFirst');
     expect(worker).toContain('NetworkOnly');
-    expect(worker).toContain('macau-bus-pwa-v0.2.1');
+    expect(worker).toContain('macau-bus-pwa-v0.2.2');
   });
 
   test('runs an update check without clearing local preferences', async ({ page }) => {
@@ -64,6 +64,25 @@ test.describe('PWA release surface', () => {
     const offlineResult = await page.evaluate(async () => {
       try {
         const response = await fetch('/api/health');
+        return { ok: true, status: response.status };
+      } catch {
+        return { ok: false, status: 0 };
+      }
+    });
+    await context.setOffline(false);
+    expect(offlineResult).toEqual({ ok: false, status: 0 });
+  });
+
+  test('keeps the exact API root network-only', async ({ page, context }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller), { timeout: 15_000 });
+    await expect.poll(async () => page.evaluate(async () => (await fetch('/api')).status)).toBe(404);
+
+    await context.setOffline(true);
+    const offlineResult = await page.evaluate(async () => {
+      try {
+        const response = await fetch('/api');
         return { ok: true, status: response.status };
       } catch {
         return { ok: false, status: 0 };

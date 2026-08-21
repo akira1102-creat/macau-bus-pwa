@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:4173';
+const parsedBaseURL = new URL(baseURL);
+const webServerPort = parsedBaseURL.port || (parsedBaseURL.protocol === 'https:' ? '443' : '80');
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -32,7 +34,7 @@ export default defineConfig({
     env: {
       NODE_ENV: 'production',
       HOST: '127.0.0.1',
-      PORT: '4173',
+      PORT: webServerPort,
     },
   },
 });

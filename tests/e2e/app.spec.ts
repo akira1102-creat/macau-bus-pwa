@@ -10,7 +10,7 @@ test.describe('澳門巴士核心流程', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: '澳門巴士' })).toBeVisible();
 
-    await page.getByRole('button', { name: '路線' }).click();
+    await page.getByRole('button', { name: '路線', exact: true }).click();
     await expect(page.getByRole('heading', { name: '所有路線' })).toBeVisible();
     const routeSearch = page.getByRole('searchbox', { name: '搜尋路線' });
     await routeSearch.fill('1');

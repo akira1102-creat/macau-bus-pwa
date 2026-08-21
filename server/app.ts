@@ -23,6 +23,7 @@ import { registerRealtimeRoutes, RealtimeRateLimiter } from './routes/realtime';
 export interface BuildServerOptions extends ServerConfigOverrides {
   catalog?: TransitCatalog;
   catalogRepository?: CatalogRepository;
+  catalogPath?: string;
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
   client?: DsatClient;
@@ -31,10 +32,17 @@ export interface BuildServerOptions extends ServerConfigOverrides {
   staticDir?: string;
 }
 
-function loadDefaultCatalog(): TransitCatalog {
-  const catalogPath = fileURLToPath(new URL('../public/data/catalog.json', import.meta.url));
-  const raw = JSON.parse(readFileSync(catalogPath, 'utf8')) as unknown;
-  return TransitCatalogSchema.parse(raw);
+function defaultCatalogPath(): string {
+  return fileURLToPath(new URL('../public/data/catalog.json', import.meta.url));
+}
+
+function loadCatalog(catalogPath: string): TransitCatalog | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(catalogPath, 'utf8')) as unknown;
+    return TransitCatalogSchema.parse(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 const SHELL_CACHE_CONTROL = 'no-cache, no-store, must-revalidate';
@@ -50,8 +58,11 @@ function sendShell(staticDir: string, reply: FastifyReply): FastifyReply {
 
 export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const config = resolveServerConfig(options);
+  const catalog = options.catalog
+    ?? loadCatalog(options.catalogPath ?? defaultCatalogPath());
   const catalogRepository = options.catalogRepository
-    ?? createCatalogRepository(options.catalog ?? loadDefaultCatalog());
+    ?? (catalog ? createCatalogRepository(catalog) : undefined);
+  const catalogReady = Boolean(catalogRepository);
   const now = options.now ?? (() => new Date());
   const client = options.client ?? createDsatClient({
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
@@ -105,10 +116,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     return reply.code(404).send({ error: 'not-found' });
   });
 
-  registerHealthRoute(app);
-  registerRealtimeRoutes({ app, catalog: catalogRepository, client, cache, now, rateLimiter });
+  registerHealthRoute(app, { catalogReady });
+  registerRealtimeRoutes({ app, catalog: catalogRepository, catalogReady, client, cache, now, rateLimiter });
   if (config.environment === 'development' && isDevelopmentEnvironment()) {
-    registerDebugRoute({ app, catalog: catalogRepository, client });
+    registerDebugRoute({ app, catalog: catalogRepository, catalogReady, client });
   }
   return app;
 }
