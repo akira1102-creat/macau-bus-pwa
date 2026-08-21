@@ -222,13 +222,18 @@ export function buildCatalogFromUpstream(input: UpstreamStaticData, options: Cat
       directions,
     });
   }
+  const catalogRouteIds = new Set(routes.map((route) => route.id));
+  const normalizedStops = stops.map((stop) => ({
+    ...stop,
+    routeIds: stop.routeIds.filter((routeId) => catalogRouteIds.has(routeId)),
+  }));
 
   return {
     version: 1,
     generatedAt: options.generatedAt,
     provenance: options.provenance,
     routes,
-    stops,
+    stops: normalizedStops,
     segmentTimes: normalizeSegmentTimes(input.segmentTimes),
   };
 }
@@ -304,7 +309,7 @@ async function main(): Promise<void> {
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : error);
+    console.error(`同步失敗：${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
   });
 }

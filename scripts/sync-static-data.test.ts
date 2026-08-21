@@ -44,6 +44,26 @@ describe('static catalog synchronizer', () => {
     expect(catalog.segmentTimes[0]?.medianSeconds).toBe(55);
   });
 
+  it('filters dangling upstream route ids after the catalog route set is built', () => {
+    const invalid = structuredClone(upstream) as UpstreamStaticData;
+    const stops = invalid.busStops as Array<{ routeIds: string[] }>;
+    stops[0]!.routeIds = ['1', 'MISSING-ROUTE'];
+
+    const catalog = buildCatalogFromUpstream(invalid, {
+      generatedAt: '2026-08-21T00:00:00.000Z',
+      provenance: {
+        sourceRepository: 'https://github.com/example/macau-bus-data',
+        sourceRef: 'fixture-ref-20260821',
+        syncedAt: '2026-08-21T00:00:00.000Z',
+        files: [],
+      },
+    });
+    const routeIds = new Set(catalog.routes.map((route) => route.id));
+
+    expect(catalog.stops[0]?.routeIds).toEqual(['1']);
+    expect(catalog.stops.every((stop) => stop.routeIds.every((routeId) => routeIds.has(routeId)))).toBe(true);
+  });
+
   it('allowlists exactly the five upstream files and records URL/ref/time/SHA-256', () => {
     expect(UPSTREAM_FILES).toEqual([
       'bus-stops.json',
