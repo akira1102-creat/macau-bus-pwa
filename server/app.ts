@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
+import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import Fastify, { type FastifyInstance } from 'fastify';
+import fastifyStatic from '@fastify/static';
 
 import type { CatalogRepository } from '../src/data/catalog-repository';
 import { createCatalogRepository } from '../src/data/catalog-repository';
@@ -26,6 +28,7 @@ export interface BuildServerOptions extends ServerConfigOverrides {
   client?: DsatClient;
   cache?: RealtimeCache<RealtimeRouteResponse>;
   logger?: boolean;
+  staticDir?: string;
 }
 
 function loadDefaultCatalog(): TransitCatalog {
@@ -60,9 +63,37 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   });
   const app = Fastify({ logger: options.logger ?? false });
 
+  if (options.staticDir) {
+    app.register(fastifyStatic, {
+      root: options.staticDir,
+      prefix: '/',
+      index: false,
+    });
+    app.get('/', (_request, reply) => {
+      try {
+        const shell = readFileSync(join(options.staticDir!, 'index.html'), 'utf8');
+        return reply.type('text/html; charset=utf-8').code(200).send(shell);
+      } catch {
+        return reply.code(404).send({ error: 'not-found' });
+      }
+    });
+  }
+
   app.setNotFoundHandler((request, reply) => {
     if (request.url.startsWith('/api/')) {
       reply.header('Cache-Control', 'no-store');
+      return reply.code(404).send({ error: 'not-found' });
+    }
+    if (options.staticDir) {
+      const pathname = new URL(request.url, 'http://localhost').pathname;
+      if (!extname(pathname)) {
+        try {
+          const shell = readFileSync(join(options.staticDir, 'index.html'), 'utf8');
+          return reply.type('text/html; charset=utf-8').code(200).send(shell);
+        } catch {
+          // Keep the normal not-found response when dist is not built yet.
+        }
+      }
     }
     return reply.code(404).send({ error: 'not-found' });
   });
