@@ -8,6 +8,7 @@ import { createCatalogRepository } from '../src/data/catalog-repository';
 import type { RealtimeRouteResponse, TransitCatalog } from '../shared/transit-contract';
 import { TransitCatalogSchema } from '../shared/transit-contract';
 import {
+  isDevelopmentEnvironment,
   resolveServerConfig,
   type ServerConfigOverrides,
 } from './config';
@@ -55,12 +56,20 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     now: () => now().getTime(),
     windowMs: config.rateLimitWindowMs,
     maxRequests: config.rateLimitMaxRequests,
+    maxTrackedKeys: config.rateLimitMaxTrackedKeys,
   });
   const app = Fastify({ logger: options.logger ?? false });
 
+  app.setNotFoundHandler((request, reply) => {
+    if (request.url.startsWith('/api/')) {
+      reply.header('Cache-Control', 'no-store');
+    }
+    return reply.code(404).send({ error: 'not-found' });
+  });
+
   registerHealthRoute(app);
   registerRealtimeRoutes({ app, catalog: catalogRepository, client, cache, now, rateLimiter });
-  if (config.environment === 'development') {
+  if (isDevelopmentEnvironment()) {
     registerDebugRoute({ app, catalog: catalogRepository, client });
   }
   return app;

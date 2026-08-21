@@ -19,6 +19,7 @@ export interface RealtimeRateLimiterOptions {
   now?: () => number;
   windowMs: number;
   maxRequests: number;
+  maxTrackedKeys?: number;
 }
 
 export class RealtimeRateLimiter {
@@ -26,17 +27,36 @@ export class RealtimeRateLimiter {
   private readonly now: () => number;
   private readonly windowMs: number;
   private readonly maxRequests: number;
+  private readonly maxTrackedKeys: number;
 
   constructor(options: RealtimeRateLimiterOptions) {
     this.now = options.now ?? (() => Date.now());
     this.windowMs = options.windowMs;
     this.maxRequests = options.maxRequests;
+    this.maxTrackedKeys = Math.max(1, options.maxTrackedKeys ?? 1_000);
+  }
+
+  get trackedKeyCount(): number {
+    return this.states.size;
   }
 
   allow(key: string): boolean {
     const currentTime = this.now();
+    for (const [stateKey, state] of this.states) {
+      if (currentTime - state.windowStartedAt >= this.windowMs) {
+        this.states.delete(stateKey);
+      }
+    }
     const previous = this.states.get(key);
     if (!previous || currentTime - previous.windowStartedAt >= this.windowMs) {
+      this.states.delete(key);
+      while (this.states.size >= this.maxTrackedKeys) {
+        const oldestKey = this.states.keys().next().value as string | undefined;
+        if (oldestKey === undefined) {
+          break;
+        }
+        this.states.delete(oldestKey);
+      }
       this.states.set(key, { windowStartedAt: currentTime, count: 1 });
       return true;
     }
@@ -44,6 +64,8 @@ export class RealtimeRateLimiter {
       return false;
     }
     previous.count += 1;
+    this.states.delete(key);
+    this.states.set(key, previous);
     return true;
   }
 }

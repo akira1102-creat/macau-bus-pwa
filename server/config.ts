@@ -6,6 +6,7 @@ export const DSAT_MAX_RESPONSE_BYTES = 1_048_576;
 export const REALTIME_FRESH_TTL_MS = 12_000;
 export const REALTIME_RATE_LIMIT_WINDOW_MS = 60_000;
 export const REALTIME_RATE_LIMIT_MAX_REQUESTS = 60;
+export const REALTIME_RATE_LIMIT_MAX_TRACKED_KEYS = 1_000;
 
 export type ServerEnvironment = 'development' | 'production' | 'test';
 
@@ -19,6 +20,7 @@ export interface ServerConfig {
   realtimeFreshTtlMs: number;
   rateLimitWindowMs: number;
   rateLimitMaxRequests: number;
+  rateLimitMaxTrackedKeys: number;
 }
 
 export interface ServerConfigOverrides {
@@ -32,19 +34,30 @@ export interface ServerConfigOverrides {
   realtimeFreshTtlMs?: number;
   rateLimitWindowMs?: number;
   rateLimitMaxRequests?: number;
+  rateLimitMaxTrackedKeys?: number;
 }
 
 function environmentFromNode(): ServerEnvironment {
   const value = process.env.NODE_ENV;
-  if (value === 'production' || value === 'test') {
+  if (value === 'development' || value === 'production' || value === 'test') {
     return value;
   }
-  return 'development';
+  return 'production';
+}
+
+function normalizeEnvironment(value: unknown): ServerEnvironment | undefined {
+  return value === 'development' || value === 'production' || value === 'test'
+    ? value
+    : undefined;
 }
 
 export function resolveServerConfig(overrides: ServerConfigOverrides = {}): ServerConfig {
+  const environmentOverride = overrides.environment ?? overrides.env;
+  const explicitEnvironment = environmentOverride === undefined
+    ? environmentFromNode()
+    : normalizeEnvironment(environmentOverride) ?? 'production';
   return {
-    environment: overrides.environment ?? overrides.env ?? environmentFromNode(),
+    environment: explicitEnvironment,
     dsatEndpoint: overrides.dsatEndpoint ?? DSAT_ENDPOINT,
     dsatReferer: overrides.dsatReferer ?? DSAT_REFERER,
     dsatOrigin: overrides.dsatOrigin ?? DSAT_ORIGIN,
@@ -53,5 +66,10 @@ export function resolveServerConfig(overrides: ServerConfigOverrides = {}): Serv
     realtimeFreshTtlMs: overrides.realtimeFreshTtlMs ?? REALTIME_FRESH_TTL_MS,
     rateLimitWindowMs: overrides.rateLimitWindowMs ?? REALTIME_RATE_LIMIT_WINDOW_MS,
     rateLimitMaxRequests: overrides.rateLimitMaxRequests ?? REALTIME_RATE_LIMIT_MAX_REQUESTS,
+    rateLimitMaxTrackedKeys: overrides.rateLimitMaxTrackedKeys ?? REALTIME_RATE_LIMIT_MAX_TRACKED_KEYS,
   };
+}
+
+export function isDevelopmentEnvironment(): boolean {
+  return process.env.NODE_ENV === 'development';
 }
