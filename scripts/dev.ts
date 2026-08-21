@@ -1,11 +1,16 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 
-const npmCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+import { resolveLocalCommand } from './dev-runtime';
+
 const children: ChildProcess[] = [];
 let shuttingDown = false;
 
-function start(command: string, args: string[], env: NodeJS.ProcessEnv): ChildProcess {
-  const child = spawn(npmCommand, ['--no-install', command, ...args], {
+function start(command: 'tsx' | 'vite', args: string[], env: NodeJS.ProcessEnv): ChildProcess {
+  const localCommand = resolveLocalCommand(command, {
+    cwd: process.cwd(),
+    nodeExecutable: process.execPath,
+  });
+  const child = spawn(localCommand.executable, [...localCommand.args, ...args], {
     env: { ...process.env, ...env },
     stdio: 'inherit',
   });
@@ -34,7 +39,10 @@ const api = start('tsx', ['server/index.ts'], {
   HOST: '127.0.0.1',
   PORT: '3001',
 });
-const frontend = start('vite', ['--host', '127.0.0.1', '--port', '5173'], {});
+const forwardedFrontendArgs = process.argv.slice(2);
+const frontend = start('vite', forwardedFrontendArgs.length > 0
+  ? forwardedFrontendArgs
+  : ['--host', '127.0.0.1', '--port', '5173'], {});
 
 for (const child of [api, frontend]) {
   child.once('error', () => stopAll(1));

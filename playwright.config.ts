@@ -27,7 +27,7 @@ export default defineConfig({
   webServer: {
     command: 'npm run build && npm run start',
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === '1',
     timeout: 120_000,
     env: {
       NODE_ENV: 'production',

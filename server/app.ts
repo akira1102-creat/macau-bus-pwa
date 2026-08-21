@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import fastifyStatic from '@fastify/static';
 
 import type { CatalogRepository } from '../src/data/catalog-repository';
@@ -37,6 +37,17 @@ function loadDefaultCatalog(): TransitCatalog {
   return TransitCatalogSchema.parse(raw);
 }
 
+const SHELL_CACHE_CONTROL = 'no-cache, no-store, must-revalidate';
+
+function sendShell(staticDir: string, reply: FastifyReply): FastifyReply {
+  try {
+    const shell = readFileSync(join(staticDir, 'index.html'), 'utf8');
+    return reply.type('text/html; charset=utf-8').code(200).send(shell);
+  } catch {
+    return reply.code(404).send({ error: 'not-found' });
+  }
+}
+
 export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const config = resolveServerConfig(options);
   const catalogRepository = options.catalogRepository
@@ -64,35 +75,31 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const app = Fastify({ logger: options.logger ?? false });
 
   if (options.staticDir) {
+    app.get('/', (_request, reply) => {
+      reply.header('Cache-Control', SHELL_CACHE_CONTROL);
+      return sendShell(options.staticDir!, reply);
+    });
+    app.get('/index.html', (_request, reply) => {
+      reply.header('Cache-Control', SHELL_CACHE_CONTROL);
+      return sendShell(options.staticDir!, reply);
+    });
     app.register(fastifyStatic, {
       root: options.staticDir,
       prefix: '/',
       index: false,
     });
-    app.get('/', (_request, reply) => {
-      try {
-        const shell = readFileSync(join(options.staticDir!, 'index.html'), 'utf8');
-        return reply.type('text/html; charset=utf-8').code(200).send(shell);
-      } catch {
-        return reply.code(404).send({ error: 'not-found' });
-      }
-    });
   }
 
   app.setNotFoundHandler((request, reply) => {
-    if (request.url.startsWith('/api/')) {
+    const pathname = new URL(request.url, 'http://localhost').pathname;
+    if (pathname === '/api' || pathname.startsWith('/api/')) {
       reply.header('Cache-Control', 'no-store');
       return reply.code(404).send({ error: 'not-found' });
     }
     if (options.staticDir) {
-      const pathname = new URL(request.url, 'http://localhost').pathname;
       if (!extname(pathname)) {
-        try {
-          const shell = readFileSync(join(options.staticDir, 'index.html'), 'utf8');
-          return reply.type('text/html; charset=utf-8').code(200).send(shell);
-        } catch {
-          // Keep the normal not-found response when dist is not built yet.
-        }
+        reply.header('Cache-Control', SHELL_CACHE_CONTROL);
+        return sendShell(options.staticDir, reply);
       }
     }
     return reply.code(404).send({ error: 'not-found' });

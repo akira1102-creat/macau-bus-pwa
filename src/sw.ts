@@ -17,6 +17,27 @@ const NAVIGATION_CACHE = `${CACHE_PREFIX}-navigation-${APP_RELEASE}`;
 const ASSET_CACHE = `${CACHE_PREFIX}-assets-${APP_RELEASE}`;
 const CATALOG_CACHE = `${CACHE_PREFIX}-catalog-${APP_RELEASE}`;
 
+async function cacheOfflineShell(): Promise<void> {
+  const shellUrls = [
+    self.registration.scope,
+    new URL('index.html', self.registration.scope).toString(),
+  ];
+  const cache = await caches.open(NAVIGATION_CACHE);
+  await Promise.all(shellUrls.map(async (shellUrl) => {
+    const response = await fetch(new Request(shellUrl, { cache: 'reload' }));
+    if (!response.ok) {
+      throw new Error(`offline shell request failed: ${response.status}`);
+    }
+    await cache.put(shellUrl, response);
+  }));
+}
+
+const offlineShellFallbackPlugin = {
+  async handlerDidError(): Promise<Response> {
+    return await caches.match(self.registration.scope) ?? Response.error();
+  },
+};
+
 const precacheManifest = (self.__WB_MANIFEST ?? []).filter((entry) => {
   const url = typeof entry === 'string' ? entry : entry.url;
   const pathname = new URL(url, self.location.origin).pathname;
@@ -27,8 +48,11 @@ precacheAndRoute(precacheManifest);
 cleanupOutdatedCaches();
 clientsClaim();
 
-self.addEventListener('install', () => {
-  void self.skipWaiting();
+self.addEventListener('install', (event) => {
+  event.waitUntil(Promise.all([
+    cacheOfflineShell(),
+    self.skipWaiting(),
+  ]));
 });
 
 self.addEventListener('activate', (event) => {
@@ -54,7 +78,11 @@ registerRoute(
 
 registerRoute(
   ({ request }) => isNavigationRequest(request),
-  new NetworkFirst({ cacheName: NAVIGATION_CACHE, networkTimeoutSeconds: 3 }),
+  new NetworkFirst({
+    cacheName: NAVIGATION_CACHE,
+    networkTimeoutSeconds: 3,
+    plugins: [offlineShellFallbackPlugin],
+  }),
 );
 
 registerRoute(

@@ -35,7 +35,6 @@ test.describe('澳門巴士核心流程', () => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller), { timeout: 15_000 });
-    await page.reload();
     await context.setOffline(true);
     await page.reload();
 

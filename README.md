@@ -17,7 +17,7 @@ npm run build
 
 `npm run dev` 會同時啟動 Vite（`http://127.0.0.1:5173`）及本機 Fastify API（port 3001），Vite 會把 `/api` 代理到 API process。production 先執行 `npm run build`，再以 `npm run start` 由同一個 Fastify process 提供 `dist/`、SPA fallback 及 `/api`。
 
-PWA release id 為 `macau-bus-pwa-v0.2.0`，並同步出現在 app release、service-worker cache names 及 production worker。Service worker 使用 navigation NetworkFirst、hashed shell／catalog CacheFirst，`/api` 及 OpenStreetMap tiles NetworkOnly；更新會在啟動、pageshow 及重返 visible 時檢查，保留 localStorage／IndexedDB。
+PWA release id 為 `macau-bus-pwa-v0.2.1`，並同步出現在 app release、service-worker cache names 及 production worker。Service worker 使用 navigation NetworkFirst、hashed shell／catalog CacheFirst，`/api` 及 OpenStreetMap tiles NetworkOnly；更新會在啟動、pageshow 及重返 visible 時檢查，保留 localStorage／IndexedDB。
 
 可用以下指令執行完整本機驗證及兩個 viewport 的 Playwright smoke：
 

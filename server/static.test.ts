@@ -30,10 +30,17 @@ describe('production static integration', () => {
     const root = await app.inject({ method: 'GET', url: '/' });
     expect(root.statusCode).toBe(200);
     expect(root.headers['content-type']).toContain('text/html');
+    expect(root.headers['cache-control']).toMatch(/no-cache|no-store/);
     expect(root.body).toContain('test shell');
+
+    const index = await app.inject({ method: 'GET', url: '/index.html' });
+    expect(index.statusCode).toBe(200);
+    expect(index.headers['cache-control']).toMatch(/no-cache|no-store/);
+    expect(index.body).toContain('test shell');
 
     const fallback = await app.inject({ method: 'GET', url: '/routes?tab=routes' });
     expect(fallback.statusCode).toBe(200);
+    expect(fallback.headers['cache-control']).toMatch(/no-cache|no-store/);
     expect(fallback.body).toContain('test shell');
 
     const asset = await app.inject({ method: 'GET', url: '/assets.js' });
@@ -43,5 +50,16 @@ describe('production static integration', () => {
     const health = await app.inject({ method: 'GET', url: '/api/health' });
     expect(health.statusCode).toBe(200);
     expect(health.json()).toEqual({ status: 'ok' });
+
+    const exactApi = await app.inject({ method: 'GET', url: '/api' });
+    expect(exactApi.statusCode).toBe(404);
+    expect(exactApi.headers['cache-control']).toBe('no-store');
+    expect(exactApi.headers['content-type']).toContain('application/json');
+    expect(exactApi.json()).toEqual({ error: 'not-found' });
+
+    const exactApiWithQuery = await app.inject({ method: 'GET', url: '/api?probe=1' });
+    expect(exactApiWithQuery.statusCode).toBe(404);
+    expect(exactApiWithQuery.headers['cache-control']).toBe('no-store');
+    expect(exactApiWithQuery.json()).toEqual({ error: 'not-found' });
   });
 });
