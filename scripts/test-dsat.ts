@@ -6,6 +6,7 @@ export const DSAT_REFERER = 'https://bis.dsat.gov.mo:37812/macauweb/';
 export const DSAT_ORIGIN = 'https://bis.dsat.gov.mo:37812';
 export const DSAT_TIMEOUT_MS = 4_000;
 export const DSAT_MAX_RESPONSE_BYTES = 1_048_576;
+export const DSAT_USAGE = 'npm run dsat:test -- --route 1 --direction 0';
 
 export interface DsatProbeInput {
   route: string;
@@ -52,6 +53,13 @@ export class DsatProbeError extends Error {
     this.code = code;
     this.status = details.status;
     this.applicationHeader = details.applicationHeader;
+  }
+}
+
+export class DsatUsageError extends Error {
+  constructor() {
+    super('Invalid DSAT probe arguments');
+    this.name = 'DsatUsageError';
   }
 }
 
@@ -239,6 +247,9 @@ function safeStatus(value: number | undefined): string {
 
 export function formatDsatProbeError(error: unknown): string {
   const prefix = 'DSAT 測試失敗：';
+  if (error instanceof DsatUsageError) {
+    return `DSAT 測試用法：${DSAT_USAGE}`;
+  }
   if (error instanceof DsatProbeError) {
     switch (error.code) {
       case 'http':
@@ -297,7 +308,7 @@ async function main(): Promise<void> {
   const directionValue = argument('--direction');
   const direction = directionValue === '0' ? 0 : directionValue === '1' ? 1 : undefined;
   if (!route || direction === undefined) {
-    throw new Error('用法：npm run dsat:test -- --route 1 --direction 0');
+    throw new DsatUsageError();
   }
 
   const request = buildDsatProbeRequest({ route, direction });

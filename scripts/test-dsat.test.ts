@@ -6,6 +6,7 @@ import {
   DSAT_REFERER,
   DSAT_TIMEOUT_MS,
   DsatProbeError,
+  DsatUsageError,
   buildDsatProbeRequest,
   fetchDsatProbe,
   formatDsatProbeError,
@@ -125,6 +126,13 @@ describe('DSAT probe request', () => {
   it('maps abort and network errors to stable Traditional Chinese without raw English', () => {
     expect(formatDsatProbeError(new DOMException('English timeout detail', 'TimeoutError'))).toBe('DSAT 測試失敗：請求逾時或已中止。');
     expect(formatDsatProbeError(new TypeError('fetch failed: private network detail'))).toBe('DSAT 測試失敗：網絡連線失敗。');
+  });
+
+  it('preserves a useful Traditional Chinese usage instruction for invalid CLI arguments', () => {
+    const message = formatDsatProbeError(new DsatUsageError());
+
+    expect(message).toBe('DSAT 測試用法：npm run dsat:test -- --route 1 --direction 0');
+    expect(message).not.toContain('無法取得 DSAT 資料');
   });
 
   it('maps HTTP, application header, invalid JSON, and missing-body failures with safe codes', () => {
