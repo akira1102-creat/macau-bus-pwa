@@ -41,4 +41,24 @@ describe('browser realtime API client', () => {
       status: 502,
     } satisfies Partial<RealtimeApiError>);
   });
+
+  it.each([
+    { route: '26A', direction: 0 as const },
+    { route: '1', direction: 1 as const },
+  ])('rejects a normalized response whose route/direction differs from the request', async (mismatch) => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      route: mismatch.route,
+      direction: mismatch.direction,
+      updatedAt: '2026-08-21T00:00:00.000Z',
+      ageSeconds: 0,
+      stale: false,
+      source: 'DSAT observation',
+      buses: [],
+    }), { status: 200 }));
+
+    await expect(getRealtimeRoute('1', 0, { fetch: fetcher })).rejects.toMatchObject({
+      name: 'RealtimeApiError',
+      code: 'response-mismatch',
+    });
+  });
 });

@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getCurrentPositionOnce } from './geolocation';
 import type { CurrentPositionError } from './geolocation';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('one-shot browser geolocation', () => {
   it('resolves a sanitized position after exactly one getCurrentPosition call', async () => {
@@ -36,5 +40,27 @@ describe('one-shot browser geolocation', () => {
       code: 'permission-denied',
     } satisfies Partial<CurrentPositionError>);
     expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an invalid coordinate payload', async () => {
+    const getCurrentPosition = vi.fn((success: PositionCallback) => {
+      success({
+        coords: { latitude: 91, longitude: 113, accuracy: 5 } as GeolocationCoordinates,
+        timestamp: Date.now(),
+      } as GeolocationPosition);
+    });
+
+    await expect(getCurrentPositionOnce({
+      geolocation: { getCurrentPosition } as Pick<Geolocation, 'getCurrentPosition'>,
+    })).rejects.toMatchObject({ code: 'invalid-position' });
+  });
+
+  it('rejects when browser geolocation is unavailable', async () => {
+    vi.stubGlobal('navigator', {});
+
+    await expect(getCurrentPositionOnce()).rejects.toMatchObject({
+      name: 'CurrentPositionError',
+      code: 'unsupported',
+    } satisfies Partial<CurrentPositionError>);
   });
 });

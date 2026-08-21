@@ -3,7 +3,7 @@ import type {
   TransitCatalog,
 } from '../../shared/transit-contract';
 
-/** Optional explicit observation station for callers displaying one bus at a time. */
+/** Explicit observation station for callers displaying one bus at a time. */
 export interface EtaEstimateOptions {
   catalog: TransitCatalog;
   realtime: RealtimeRouteResponse;
@@ -43,10 +43,7 @@ function estimate(
     return null;
   }
 
-  const requestedObservation = observationStationCode?.trim();
-  const observation = requestedObservation
-    ? requestedObservation
-    : realtime.buses.find((bus) => direction.stopIds.includes(bus.stationCode.trim()))?.stationCode.trim();
+  const observation = observationStationCode?.trim();
   if (!observation) {
     return null;
   }

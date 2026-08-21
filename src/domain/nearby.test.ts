@@ -36,6 +36,29 @@ const stops: BusStop[] = [
 
 const catalog = { stops } as TransitCatalog;
 const origin = { latitude: 0, longitude: 0 };
+const earthRadiusMeters = 6_371_000;
+
+function stopAtMeters(id: string, distanceMeters: number): BusStop {
+  // Equatorial longitude has a direct inverse for Haversine distance. The tiny
+  // representational overshoot exercises the production epsilon, not a wider UI radius.
+  const longitude = ((distanceMeters / earthRadiusMeters) * 180) / Math.PI * (1 + 1e-14);
+  return {
+    id,
+    name: id,
+    nameCn: `${id}站`,
+    coordinates: [longitude, 0],
+    routeIds: ['1'],
+  };
+}
+
+const boundaryCatalog = {
+  stops: [
+    stopAtMeters('R300', 300),
+    stopAtMeters('R500', 500),
+    stopAtMeters('R1000', 1_000),
+    stopAtMeters('OVER1000', 1_001),
+  ],
+} as TransitCatalog;
 
 describe('findNearbyStops', () => {
   it('orders stops by local Haversine distance', () => {
@@ -61,5 +84,13 @@ describe('findNearbyStops', () => {
     findNearbyStops(catalog, origin, 300);
 
     expect(stops).toEqual(before);
+  });
+
+  it.each([
+    [300, ['R300']],
+    [500, ['R300', 'R500']],
+    [1_000, ['R300', 'R500', 'R1000']],
+  ])('includes mathematically constructed exact %sm boundary points only', (radiusMeters, expectedIds) => {
+    expect(findNearbyStops(boundaryCatalog, origin, radiusMeters).map((entry) => entry.stop.id)).toEqual(expectedIds);
   });
 });

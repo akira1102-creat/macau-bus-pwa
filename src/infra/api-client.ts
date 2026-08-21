@@ -10,7 +10,12 @@ export interface RealtimeApiClientOptions {
   signal?: AbortSignal;
 }
 
-export type RealtimeApiErrorCode = 'invalid-request' | 'network' | 'http' | 'invalid-response';
+export type RealtimeApiErrorCode =
+  | 'invalid-request'
+  | 'network'
+  | 'http'
+  | 'invalid-response'
+  | 'response-mismatch';
 
 export class RealtimeApiError extends Error {
   readonly code: RealtimeApiErrorCode;
@@ -66,8 +71,15 @@ export async function getRealtimeRoute(
 
   try {
     // Zod's object parser strips unknown fields, including any accidental `raw` member.
-    return RealtimeRouteResponseSchema.parse(payload);
+    const normalized = RealtimeRouteResponseSchema.parse(payload);
+    if (normalized.route !== route.trim() || normalized.direction !== direction) {
+      throw new RealtimeApiError('response-mismatch');
+    }
+    return normalized;
   } catch (error) {
+    if (error instanceof RealtimeApiError) {
+      throw error;
+    }
     throw new RealtimeApiError('invalid-response', { cause: error });
   }
 }

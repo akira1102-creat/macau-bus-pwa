@@ -128,7 +128,12 @@ export function savePreferences(preferences: Preferences, options: PreferencesOp
   const normalized = normalizePreferences(PreferencesSchema.parse(preferences));
   const storage = resolveStorage(options);
   if (storage) {
-    storage.setItem(resolveKey(options), JSON.stringify(normalized));
+    try {
+      storage.setItem(resolveKey(options), JSON.stringify(normalized));
+    } catch {
+      // Private-mode/quota failures leave the normalized value available to the
+      // in-memory store; callers must not lose an interaction to persistence.
+    }
   }
   return normalized;
 }
@@ -153,37 +158,47 @@ export function createLocalPreferences(options: LocalPreferencesOptions = {}): L
     ...(options.storage === undefined ? {} : { storage: options.storage }),
     storageKey,
   };
+  let inMemory: Preferences | undefined;
+  const read = (): Preferences => inMemory ?? loadPreferences(storageOptions);
+  const persist = (preferences: Preferences): Preferences => {
+    const normalized = savePreferences(preferences, storageOptions);
+    inMemory = normalized;
+    return normalized;
+  };
   return {
     storageKey,
     appRelease: options.appRelease,
-    get: () => loadPreferences(storageOptions),
-    set: (preferences) => savePreferences(preferences, storageOptions),
-    getFavorites: () => loadPreferences(storageOptions).favorites,
+    get: read,
+    set: persist,
+    getFavorites: () => read().favorites,
     setFavorites: (favorites) => {
-      const current = loadPreferences(storageOptions);
-      return savePreferences({ ...current, favorites: [...favorites] }, storageOptions);
+      const current = read();
+      return persist({ ...current, favorites: [...favorites] });
     },
     toggleFavorite: (routeId) => {
-      const current = loadPreferences(storageOptions);
+      const current = read();
       const normalized = routeId.trim();
+      if (!normalized) {
+        return current;
+      }
       const favorites = current.favorites.includes(normalized)
         ? current.favorites.filter((candidate) => candidate !== normalized)
         : [normalized, ...current.favorites];
-      return savePreferences({ ...current, favorites }, storageOptions);
+      return persist({ ...current, favorites });
     },
-    getRecent: () => loadPreferences(storageOptions).recent,
+    getRecent: () => read().recent,
     addRecent: (routeId) => {
-      const current = loadPreferences(storageOptions);
+      const current = read();
       const normalized = routeId.trim();
       const recent = normalized
         ? [normalized, ...current.recent.filter((candidate) => candidate !== normalized)].slice(0, 10)
         : current.recent;
-      return savePreferences({ ...current, recent }, storageOptions);
+      return persist({ ...current, recent });
     },
-    getTheme: () => loadPreferences(storageOptions).theme,
+    getTheme: () => read().theme,
     setTheme: (theme) => {
-      const current = loadPreferences(storageOptions);
-      return savePreferences({ ...current, theme }, storageOptions);
+      const current = read();
+      return persist({ ...current, theme });
     },
   };
 }

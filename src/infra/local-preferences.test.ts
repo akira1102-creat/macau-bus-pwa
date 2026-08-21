@@ -23,6 +23,12 @@ class MemoryStorage implements PreferencesStorage {
   }
 }
 
+class QuotaStorage extends MemoryStorage {
+  override setItem(): void {
+    throw new Error('storage quota exceeded');
+  }
+}
+
 const storages: MemoryStorage[] = [];
 
 function createStorage(): MemoryStorage {
@@ -72,5 +78,16 @@ describe('versioned local preferences', () => {
 
     expect(updatedRelease.getFavorites()).toEqual(['1', '26A']);
     expect(updatedRelease.getTheme()).toBe('dark');
+  });
+
+  it('keeps preference actions safe when localStorage setItem is unavailable', () => {
+    const preferences = createLocalPreferences({ storage: new QuotaStorage() });
+
+    expect(() => preferences.setFavorites(['1'])).not.toThrow();
+    expect(() => preferences.addRecent('1')).not.toThrow();
+    expect(() => preferences.setTheme('dark')).not.toThrow();
+    expect(preferences.getFavorites()).toEqual(['1']);
+    expect(preferences.getRecent()).toEqual(['1']);
+    expect(preferences.getTheme()).toBe('dark');
   });
 });
