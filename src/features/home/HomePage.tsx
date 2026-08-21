@@ -1,5 +1,5 @@
 import { LocateFixed, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 import type { CatalogRepository } from '../../data/catalog-repository';
 import { findNearbyStops, type NearbyStop } from '../../domain/nearby';
@@ -48,6 +48,7 @@ export function HomePage({ catalog, repository, preferences, onOpenRoute, getCur
   const [preferenceState, setPreferenceState] = useState<Preferences>(() => refreshPreferences(preferences));
   const [nearbyStops, setNearbyStops] = useState<NearbyStop[]>([]);
   const [nearbyRadius, setNearbyRadius] = useState<300 | 500 | 1_000>(500);
+  const nearbyRadiusRef = useRef<300 | 500 | 1_000>(nearbyRadius);
   const [nearbyState, setNearbyState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [nearbyError, setNearbyError] = useState('');
   const [position, setPosition] = useState<CurrentPosition | null>(null);
@@ -87,7 +88,7 @@ export function HomePage({ catalog, repository, preferences, onOpenRoute, getCur
     try {
       const nextPosition = await getCurrentPosition();
       setPosition(nextPosition);
-      setNearbyStops(findNearbyStops(catalog, nextPosition, nearbyRadius));
+      setNearbyStops(findNearbyStops(catalog, nextPosition, nearbyRadiusRef.current));
       setNearbyState('ready');
     } catch (error) {
       setPosition(null);
@@ -98,6 +99,7 @@ export function HomePage({ catalog, repository, preferences, onOpenRoute, getCur
   };
 
   const changeRadius = (radius: 300 | 500 | 1_000) => {
+    nearbyRadiusRef.current = radius;
     setNearbyRadius(radius);
     if (position) {
       setNearbyStops(findNearbyStops(catalog, position, radius));

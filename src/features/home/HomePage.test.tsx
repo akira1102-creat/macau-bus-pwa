@@ -77,6 +77,31 @@ describe('HomePage', () => {
     expect(screen.getByText('甲站')).toBeVisible();
   });
 
+  it('uses the latest radius when location resolves after a radius change', async () => {
+    type PendingPosition = { latitude: number; longitude: number; accuracyMeters: null };
+    let resolvePosition: ((position: PendingPosition) => void) | undefined;
+    const getCurrentPosition = vi.fn(() => new Promise<PendingPosition>((resolve) => {
+      resolvePosition = resolve;
+    }));
+    render(
+      <HomePage
+        catalog={catalog}
+        repository={createCatalogRepository(catalog)}
+        preferences={preferences()}
+        onOpenRoute={vi.fn()}
+        getCurrentPosition={getCurrentPosition}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '使用目前位置' }));
+    fireEvent.click(screen.getByRole('button', { name: /300 米/ }));
+    resolvePosition?.({ latitude: 22.1901, longitude: 113.5401, accuracyMeters: null });
+
+    await waitFor(() => expect(screen.getByText('中央站')).toBeVisible());
+    expect(screen.queryByText('乙站')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /300 米/ })).toHaveClass('is-selected');
+  });
+
   it.each([
     ['permission-denied', '已拒絕位置權限'],
     ['unsupported', '此瀏覽器不支援定位'],

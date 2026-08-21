@@ -78,6 +78,7 @@ describe('RouteMap', () => {
     );
 
     await waitFor(() => expect(leafletMock.module.map).toHaveBeenCalledTimes(1));
+    expect(container.querySelector('.route-map')).toHaveAttribute('role', 'region');
     expect(container.querySelector('.route-map')).toHaveAttribute('aria-label', 'OpenStreetMap 路線地圖');
     expect(leafletMock.module.tileLayer).toHaveBeenCalledWith(
       'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',

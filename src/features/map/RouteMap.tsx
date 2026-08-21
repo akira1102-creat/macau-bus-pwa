@@ -118,7 +118,7 @@ export default function RouteMap({ stops, buses, userPosition, onRequestLocation
 
   return (
     <div className="route-map-shell">
-      <div className="route-map" ref={containerRef} aria-label="OpenStreetMap 路線地圖" />
+      <div className="route-map" ref={containerRef} role="region" aria-label="OpenStreetMap 路線地圖" />
       <div className="map-legend" aria-label="地圖圖例">
         <span className="legend-line" aria-hidden="true" />
         <span className="legend-dot" aria-hidden="true" />
