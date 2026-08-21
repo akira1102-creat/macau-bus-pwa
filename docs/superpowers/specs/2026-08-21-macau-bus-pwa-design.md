@@ -32,7 +32,7 @@ Backend 只接受 catalog 已知的 route，direction 只接受 `0` 或 `1`：
 
 `GET /api/bus/realtime/:route/:direction`
 
-DSAT client 向 `https://bis.dsat.gov.mo/macauweb/routestation/bus` 發送小量查詢並帶官方頁面 Referer。每次請求設 4 秒 timeout，限制 response size，以 Zod tolerant parser 驗證最外層結構；未知欄位保留於 development debug raw payload，但 production normalized response 不猜測其含義。
+2026-08-21 實測顯示現行官方網站以 `POST https://bis.dsat.gov.mo:37812/macauweb/routestation/bus` 查詢，並按網站 JavaScript 產生 token；原 prompt 中的普通 GET 只視為歷史線索。Client 會跟隨當前網站 protocol、帶官方頁面 Referer，以表單欄位傳 route/direction/token。成功 body 雖為 JSON，Content-Type 實測可能是 `text/html; charset=UTF-8`，因此按 UTF-8 text 讀取再 JSON parse，並要求 application `header === "000"`；HTTP 200 但其他 header code 仍算失敗。每次請求設 4 秒 timeout，限制 response size，以 Zod tolerant parser 驗證最外層結構；未知欄位保留於 development debug raw payload，但 production normalized response 不猜測其含義。
 
 Normalized response：
 
@@ -124,3 +124,9 @@ Unit tests 覆蓋 cache TTL/coalescing/stale fallback、DSAT parser、ETA 累加
 - 記憶體 cache 不跨 process；若日後水平擴展才引入 shared cache；
 - OSM 公共 tiles 適合低流量 prototype，正式公開前須重新評估 tile provider 與使用政策；
 - iOS Home Screen 更新及實體手機定位需另作真機驗證，桌面模擬不能代替。
+
+## 2026-08-21 實測資料備註
+
+`macau-bus-data` 的五個目標檔實測 schema：`bus-stops.json` 是 597 個站點，欄位包括 `id/name/nameCn/coordinates/routeIds/nameEn/namePor`；`operators.json` 是 route 到 operator；`route-metadata.json` 含 `version/routes` 與多語方向、schedule；`route-stops.json` 是 route 到有序 stop-code；`segment_times.json` 以 `route_direction → time bucket → from→to → {avg_sec,p50,p90,samples}` 組織。Repository 公開但沒有 LICENSE；catalog 只在本機同步與建置。
+
+四個受控 probe（1、26A；direction 0、1）均回 HTTP 200 及 application header `000`。`data.routeInfo[]` 每站含 `staCode` 與可能為空的 `busInfo[]`；bus 欄位 `busType/busCode/busPlate/status/isFacilities/passengerFlow/speed` 均應先按 string/empty-string tolerant 方式解析。動態 response 沒有 GPS；只用 `staCode` 合併 ordered static stop catalog。

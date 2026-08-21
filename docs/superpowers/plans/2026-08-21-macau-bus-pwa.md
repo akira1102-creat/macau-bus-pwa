@@ -34,7 +34,7 @@
 
 **Interfaces:**
 - Produces `TransitCatalog`, `RouteSummary`, `RouteDirection`, `BusStop`, `SegmentTime`, `loadCatalog(url): Promise<TransitCatalog>`.
-- Produces `npm run data:sync` and a polite `npm run dsat:test -- --route 1 --direction 0` probe.
+- Produces `npm run data:sync` and a polite `npm run dsat:test -- --route 1 --direction 0` POST probe using the current website token protocol.
 
 - [ ] Write failing unit tests proving route lookup, direction station order, station search, provenance validation, and rejection of malformed coordinates.
 - [ ] Run targeted Vitest tests and confirm failures are caused by missing catalog implementation.
@@ -58,7 +58,7 @@
 - [ ] Write failing parser tests from sanitized real DSAT fixtures, including missing optional strings, numeric speed strings and buses nested under station observations.
 - [ ] Write failing cache tests using a fake clock: 12-second fresh hit, concurrent miss coalescing, refresh after TTL, timeout/error stale fallback, and no-cache failure.
 - [ ] Write failing Fastify injection tests for allowlisted route, invalid direction, normalized response, `Cache-Control: no-store`, and production debug 404.
-- [ ] Implement the minimum adapter/cache/routes with AbortSignal 4-second timeout, response-size guard, Referer, rate limit, Zod validation and no automatic retries.
+- [ ] Implement the minimum POST adapter/cache/routes with the website token protocol, UTF-8 text-to-JSON parsing despite incorrect MIME, application `header === "000"` validation, AbortSignal 4-second timeout, response-size guard, Referer, rate limit and no automatic retries.
 - [ ] Run task tests, typecheck and lint; commit `加入 DSAT 即時代理與快取`.
 
 ### Task 3: Domain helpers and local state
