@@ -131,12 +131,15 @@ export function HomePage({ catalog, repository, preferences, onOpenRoute, getCur
             />
           ))}
           {searchStops.map((stop) => {
-            const routeId = stop.routeIds[0];
             return (
               <StopListItem
                 key={`stop-${stop.id}`}
                 stop={stop}
-                onOpen={routeId ? () => openRoute(routeId) : undefined}
+                routeOptions={stop.routeIds.flatMap((routeId) => {
+                  const route = repository.getRoute(routeId);
+                  return route ? [route] : [];
+                })}
+                onOpenRoute={openRoute}
               />
             );
           })}
@@ -154,22 +157,32 @@ export function HomePage({ catalog, repository, preferences, onOpenRoute, getCur
         </div>
         {nearbyState === 'loading' ? <StateMessage kind="loading">正在取得目前位置…</StateMessage> : null}
         {nearbyState === 'error' ? <StateMessage kind="error">{nearbyError}</StateMessage> : null}
+        <div className="radius-tabs" role="group" aria-label="附近範圍">
+          {([300, 500, 1_000] as const).map((radius) => (
+            <button
+              type="button"
+              key={radius}
+              className={nearbyRadius === radius ? 'is-selected' : ''}
+              aria-pressed={nearbyRadius === radius}
+              onClick={() => changeRadius(radius)}
+            >
+              {messages.locationRadius(radius)}
+            </button>
+          ))}
+        </div>
         {nearbyState === 'idle' ? <p className="muted-copy">按「使用目前位置」查看附近站點；位置只會在此裝置計算。</p> : null}
         {nearbyState === 'ready' ? (
           <>
-            <div className="radius-tabs" role="group" aria-label="附近範圍">
-              {([300, 500, 1_000] as const).map((radius) => (
-                <button type="button" key={radius} className={nearbyRadius === radius ? 'is-selected' : ''} onClick={() => changeRadius(radius)}>
-                  {messages.locationRadius(radius)}
-                </button>
-              ))}
-            </div>
             {nearbyStops.length > 0 ? nearbyStops.slice(0, 5).map(({ stop, distanceMeters }) => (
               <StopListItem
                 key={stop.id}
                 stop={stop}
                 distanceMeters={distanceMeters}
-                onOpen={stop.routeIds[0] ? () => openRoute(stop.routeIds[0] as string) : undefined}
+                routeOptions={stop.routeIds.flatMap((routeId) => {
+                  const route = repository.getRoute(routeId);
+                  return route ? [route] : [];
+                })}
+                onOpenRoute={openRoute}
               />
             )) : <p className="empty-copy">此範圍暫時沒有巴士站。</p>}
           </>

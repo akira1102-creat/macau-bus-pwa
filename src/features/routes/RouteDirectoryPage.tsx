@@ -13,9 +13,10 @@ interface RouteDirectoryPageProps {
   onlyFavorites?: boolean;
   title?: string;
   emptyCopy?: string;
+  showSearch?: boolean;
 }
 
-export function RouteDirectoryPage({ catalog, preferences, onOpenRoute, onlyFavorites = false, title = messages.routeDirectory, emptyCopy = messages.noFavorites }: RouteDirectoryPageProps) {
+export function RouteDirectoryPage({ catalog, preferences, onOpenRoute, onlyFavorites = false, title = messages.routeDirectory, emptyCopy = messages.noFavorites, showSearch = true }: RouteDirectoryPageProps) {
   const [query, setQuery] = useState('');
   const [preferenceState, setPreferenceState] = useState<Preferences>(() => preferences.get());
   const routes = useMemo(() => {
@@ -35,7 +36,7 @@ export function RouteDirectoryPage({ catalog, preferences, onOpenRoute, onlyFavo
   return (
     <div className="directory-page">
       <header className="page-heading"><h1>{title}</h1><p>使用本機同步的路線資料。</p></header>
-      {onlyFavorites || title === messages.routeMap ? null : (
+      {onlyFavorites || !showSearch ? null : (
         <label className="search-field directory-search">
           <Search aria-hidden="true" size={23} strokeWidth={1.8} />
           <span className="sr-only">搜尋路線</span>

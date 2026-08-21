@@ -2,6 +2,7 @@ import { LocateFixed } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import type * as Leaflet from 'leaflet';
 import type { LayerGroup, Map as LeafletMap } from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
 import type { BusStop, RealtimeBus } from '../../../shared/transit-contract';
 import type { CurrentPosition } from '../../infra/geolocation';

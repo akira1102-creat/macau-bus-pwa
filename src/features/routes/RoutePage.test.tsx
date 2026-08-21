@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import fixture from '../../../tests/fixtures/catalog/catalog.json';
 import { createCatalogRepository } from '../../data/catalog-repository';
 import { createLocalPreferences, type LocalPreferences, type PreferencesStorage } from '../../infra/local-preferences';
-import { RoutePage } from './RoutePage';
+import { isDebugPanelEnabled, RoutePage } from './RoutePage';
 import type { RealtimeRouteResponse, TransitCatalog } from '../../../shared/transit-contract';
 
 const catalog = fixture as TransitCatalog;
@@ -88,7 +88,7 @@ describe('RoutePage', () => {
     fireEvent.click(screen.getByRole('tab', { name: '站點' }));
     expect(screen.getByText('乙站')).toBeVisible();
     expect(screen.getByText('甲站')).toBeVisible();
-    await waitFor(() => expect(getRealtimeRoute).toHaveBeenCalledWith('1', 1));
+    await waitFor(() => expect(getRealtimeRoute).toHaveBeenCalledWith('1', 1, expect.any(AbortSignal)));
   });
 
   it('renders loading, error and stale age states without crashing the route page', async () => {
@@ -113,6 +113,38 @@ describe('RoutePage', () => {
     expect(await screen.findByText('位置按站點顯示')).toBeVisible();
     expect(screen.queryByText('開發診斷')).not.toBeInTheDocument();
     expect(screen.getByText(/約 1 分鐘到 中央站/)).toBeVisible();
+  });
+
+  it('masks plate and station code diagnostics and requires a development build', async () => {
+    expect(isDebugPanelEnabled(true, false)).toBe(false);
+    expect(isDebugPanelEnabled(true, true)).toBe(true);
+
+    const getRealtimeRoute = vi.fn().mockResolvedValue(realtime({
+      buses: [{ ...realtime().buses[0]!, plate: 'AB1234', stationCode: 'M1' }],
+    }));
+    renderRoute(getRealtimeRoute, { devMode: true });
+
+    expect(await screen.findByText('開發診斷')).toBeVisible();
+    expect(screen.queryByText('AB1234')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('開發診斷'));
+    const panel = screen.getByText('開發診斷').closest('details');
+    expect(panel).not.toBeNull();
+    expect(within(panel!).queryByText('AB1234')).not.toBeInTheDocument();
+    expect(within(panel!).queryByText('M1')).not.toBeInTheDocument();
+    expect(within(panel!).getByText('A••4')).toBeVisible();
+    expect(within(panel!).getByText('••')).toBeVisible();
+  });
+
+  it('exposes direction and data tab panels through aria controls', async () => {
+    const getRealtimeRoute = vi.fn().mockResolvedValue(realtime());
+    renderRoute(getRealtimeRoute);
+
+    const directionTab = screen.getByRole('tab', { name: '甲 → 乙' });
+    expect(directionTab).toHaveAttribute('aria-controls', 'direction-panel');
+    expect(screen.getByRole('tabpanel', { name: '甲 → 乙' })).toHaveAttribute('id', 'direction-panel');
+    const realtimeTab = screen.getByRole('tab', { name: '實時巴士' });
+    expect(realtimeTab).toHaveAttribute('aria-controls', 'realtime-panel');
+    expect(await screen.findByRole('tabpanel', { name: '實時巴士' })).toHaveAttribute('aria-live', 'polite');
   });
 
   it('polls only while the document is visible and uses the selected direction', async () => {

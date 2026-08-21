@@ -77,6 +77,91 @@ describe('HomePage', () => {
     expect(screen.getByText('甲站')).toBeVisible();
   });
 
+  it.each([
+    ['permission-denied', '已拒絕位置權限'],
+    ['unsupported', '此瀏覽器不支援定位'],
+  ] as const)('keeps the radius selector visible after %s', async (code, message) => {
+    const getCurrentPosition = vi.fn().mockRejectedValue({ code });
+    render(
+      <HomePage
+        catalog={catalog}
+        repository={createCatalogRepository(catalog)}
+        preferences={preferences()}
+        onOpenRoute={vi.fn()}
+        getCurrentPosition={getCurrentPosition}
+      />,
+    );
+
+    const oneKilometre = screen.getByRole('button', { name: /1 公里/ });
+    fireEvent.click(oneKilometre);
+    fireEvent.click(screen.getByRole('button', { name: '使用目前位置' }));
+
+    expect(await screen.findByText(new RegExp(message))).toBeVisible();
+    expect(oneKilometre).toHaveClass('is-selected');
+    expect(screen.getByRole('button', { name: /300 米/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /500 米/ })).toBeVisible();
+    const retry = screen.getByRole('button', { name: '使用目前位置' });
+    expect(retry).not.toBeDisabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(getCurrentPosition).toHaveBeenCalledTimes(2));
+  });
+
+  it('lets search results choose every route associated with one station', () => {
+    const firstRoute = catalog.routes[0]!;
+    const multiRouteCatalog: TransitCatalog = {
+      ...catalog,
+      routes: [
+        firstRoute,
+        { ...firstRoute, id: '2', name: '2', displayName: '另一條線' },
+      ],
+      stops: catalog.stops.map((stop) => stop.id === 'M1' ? { ...stop, routeIds: ['1', '2'] } : stop),
+    };
+    const onOpenRoute = vi.fn();
+    render(
+      <HomePage
+        catalog={multiRouteCatalog}
+        repository={createCatalogRepository(multiRouteCatalog)}
+        preferences={preferences()}
+        onOpenRoute={onOpenRoute}
+        getCurrentPosition={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜尋路線或巴士站' }), { target: { value: '甲站' } });
+
+    const routeOne = screen.getByRole('button', { name: '開啟路線 1 測試線' });
+    const routeTwo = screen.getByRole('button', { name: '開啟路線 2 另一條線' });
+    expect(routeOne).toBeVisible();
+    expect(routeTwo).toBeVisible();
+    fireEvent.click(routeTwo);
+    expect(onOpenRoute).toHaveBeenCalledWith('2');
+  });
+
+  it('lets nearby results choose every associated route', async () => {
+    const firstRoute = catalog.routes[0]!;
+    const multiRouteCatalog: TransitCatalog = {
+      ...catalog,
+      routes: [firstRoute, { ...firstRoute, id: '2', name: '2', displayName: '另一條線' }],
+      stops: catalog.stops.map((stop) => stop.id === 'M1' ? { ...stop, routeIds: ['1', '2'] } : stop),
+    };
+    const onOpenRoute = vi.fn();
+    render(
+      <HomePage
+        catalog={multiRouteCatalog}
+        repository={createCatalogRepository(multiRouteCatalog)}
+        preferences={preferences()}
+        onOpenRoute={onOpenRoute}
+        getCurrentPosition={vi.fn().mockResolvedValue({ latitude: 22.1901, longitude: 113.5401 })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '使用目前位置' }));
+    expect(await screen.findByText('附近巴士站')).toBeVisible();
+    const routeTwo = await screen.findByRole('button', { name: '開啟路線 2 另一條線' });
+    fireEvent.click(routeTwo);
+    expect(onOpenRoute).toHaveBeenCalledWith('2');
+  });
+
   it('persists favorite and recent route actions through local preferences', () => {
     const preferenceStore = preferences();
     render(

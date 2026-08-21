@@ -24,6 +24,21 @@ export interface RoutePageProps {
   devMode?: boolean;
 }
 
+export function isDebugPanelEnabled(devMode: boolean, environmentDev = import.meta.env.DEV): boolean {
+  return environmentDev && devMode;
+}
+
+function maskIdentifier(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    return '—';
+  }
+  if (normalized.length <= 2) {
+    return '••';
+  }
+  return `${normalized.slice(0, 1)}••${normalized.slice(-1)}`;
+}
+
 function nextStop(direction: RouteDirection, stationCode: string, repository: CatalogRepository) {
   const index = direction.stopIds.indexOf(stationCode.trim());
   const nextId = index >= 0 ? direction.stopIds[index + 1] : undefined;
@@ -55,10 +70,13 @@ export function RoutePage({
 
   const polling = useRealtimePolling(route?.id ?? routeId, direction?.id ?? 0, realtimeClient, { enabled: Boolean(route && direction) });
   const buses = polling.data?.buses ?? [];
-  const stops = (direction?.stopIds ?? []).flatMap((stopId) => {
-    const stop = repository.catalog.stops.find((candidate) => candidate.id === stopId);
-    return stop ? [stop] : [];
-  });
+  const stops = useMemo(
+    () => (direction?.stopIds ?? []).flatMap((stopId) => {
+      const stop = repository.catalog.stops.find((candidate) => candidate.id === stopId);
+      return stop ? [stop] : [];
+    }),
+    [direction?.stopIds, repository],
+  );
 
   const currentStationNames = useMemo(() => new Map(stops.map((stop) => [stop.id, stop.nameCn])), [stops]);
 
@@ -107,6 +125,8 @@ export function RoutePage({
             type="button"
             role="tab"
             key={candidate.id}
+            id={`direction-tab-${candidate.id}`}
+            aria-controls="direction-panel"
             aria-selected={candidate.id === direction.id}
             className={candidate.id === direction.id ? 'is-selected' : ''}
             onClick={() => setDirectionId(candidate.id)}
@@ -116,46 +136,48 @@ export function RoutePage({
         ))}
       </div>
 
-      {showMap ? (
-        <section className="map-section" aria-label={messages.routeMap}>
-          <Suspense fallback={<div className="map-placeholder">正在載入地圖…</div>}>
-            <LazyRouteMap
-              stops={stops}
-              buses={buses}
-              userPosition={userPosition}
-              onRequestLocation={() => void requestLocation()}
-            />
-          </Suspense>
-          {locationMessage ? <p className="map-location-message">{locationMessage}</p> : null}
-        </section>
-      ) : null}
+      <div className="direction-panel" role="tabpanel" id="direction-panel" aria-labelledby={`direction-tab-${direction.id}`} tabIndex={0}>
+        {showMap ? (
+          <section className="map-section" aria-label={messages.routeMap}>
+            <Suspense fallback={<div className="map-placeholder">正在載入地圖…</div>}>
+              <LazyRouteMap
+                stops={stops}
+                buses={buses}
+                userPosition={userPosition}
+                onRequestLocation={() => void requestLocation()}
+              />
+            </Suspense>
+            {locationMessage ? <p className="map-location-message">{locationMessage}</p> : null}
+          </section>
+        ) : null}
 
-      <div className="route-data-tabs" role="tablist" aria-label="路線資料">
-        <button type="button" role="tab" aria-selected={activeTab === 'realtime'} className={activeTab === 'realtime' ? 'is-selected' : ''} onClick={() => setActiveTab('realtime')}>
-          {messages.realtime}
-        </button>
-        <button type="button" role="tab" aria-selected={activeTab === 'stops'} className={activeTab === 'stops' ? 'is-selected' : ''} onClick={() => setActiveTab('stops')}>
-          {messages.stops}
-        </button>
+        <div className="route-data-tabs" role="tablist" aria-label="路線資料">
+          <button type="button" role="tab" id="realtime-tab" aria-controls="realtime-panel" aria-selected={activeTab === 'realtime'} className={activeTab === 'realtime' ? 'is-selected' : ''} onClick={() => setActiveTab('realtime')}>
+            {messages.realtime}
+          </button>
+          <button type="button" role="tab" id="stops-tab" aria-controls="stops-panel" aria-selected={activeTab === 'stops'} className={activeTab === 'stops' ? 'is-selected' : ''} onClick={() => setActiveTab('stops')}>
+            {messages.stops}
+          </button>
+        </div>
+
+        {activeTab === 'realtime' ? (
+          <RealtimePanel
+            routeId={route.id}
+            directionId={direction.id}
+            direction={direction}
+            buses={buses}
+            status={polling.status}
+            data={polling.data}
+            repository={repository}
+            catalog={catalog}
+            onRefresh={polling.refresh}
+            devMode={devMode}
+            stationNames={currentStationNames}
+          />
+        ) : (
+          <StopsPanel direction={direction} buses={buses} stationNames={currentStationNames} />
+        )}
       </div>
-
-      {activeTab === 'realtime' ? (
-        <RealtimePanel
-          routeId={route.id}
-          directionId={direction.id}
-          direction={direction}
-          buses={buses}
-          status={polling.status}
-          data={polling.data}
-          repository={repository}
-          catalog={catalog}
-          onRefresh={polling.refresh}
-          devMode={devMode}
-          stationNames={currentStationNames}
-        />
-      ) : (
-        <StopsPanel direction={direction} buses={buses} stationNames={currentStationNames} />
-      )}
       <p className="route-source-note">{messages.sourceNote}</p>
     </div>
   );
@@ -176,33 +198,30 @@ interface RealtimePanelProps {
 }
 
 function RealtimePanel({ routeId, directionId, direction, buses, status, data, repository, catalog, onRefresh, devMode, stationNames }: RealtimePanelProps) {
-  if (!data && status === 'loading') {
-    return <StateMessage kind="loading">{messages.loadingRealtime}</StateMessage>;
-  }
-  if (!data && status === 'error') {
-    return <StateMessage kind="error" actionLabel={messages.refresh} onAction={onRefresh}>{messages.realtimeUnavailable}</StateMessage>;
-  }
-  if (!data) {
-    return <StateMessage kind="empty">{messages.realtimeUnavailable}</StateMessage>;
-  }
-
   return (
-    <section className="realtime-panel" aria-label={messages.realtime}>
-      {status === 'error' ? <StateMessage kind="error" actionLabel={messages.refresh} onAction={onRefresh}>{messages.realtimeUnavailable}</StateMessage> : null}
-      {data.stale ? <p className="stale-message">{messages.stale(data.ageSeconds)}</p> : null}
-      {buses.length > 0 ? buses.map((bus, index) => (
-        <BusObservation
-          key={`${bus.plate}-${bus.stationCode}-${index}`}
-          bus={bus}
-          routeId={routeId}
-          directionId={directionId}
-          direction={direction}
-          repository={repository}
-          catalog={catalog}
-          stationNames={stationNames}
-        />
-      )) : <p className="empty-copy">目前沒有觀測中的巴士。</p>}
-      {devMode ? <DebugPanel data={data} /> : null}
+    <section className="realtime-panel" role="tabpanel" id="realtime-panel" aria-labelledby="realtime-tab" aria-label={messages.realtime} aria-live="polite" tabIndex={0}>
+      {!data && status === 'loading' ? <StateMessage kind="loading">{messages.loadingRealtime}</StateMessage> : null}
+      {!data && status === 'error' ? <StateMessage kind="error" actionLabel={messages.refresh} onAction={onRefresh}>{messages.realtimeUnavailable}</StateMessage> : null}
+      {!data && status !== 'loading' && status !== 'error' ? <StateMessage kind="empty">{messages.realtimeUnavailable}</StateMessage> : null}
+      {data ? (
+        <>
+          {status === 'error' ? <StateMessage kind="error" actionLabel={messages.refresh} onAction={onRefresh}>{messages.realtimeUnavailable}</StateMessage> : null}
+          {data.stale ? <p className="stale-message">{messages.stale(data.ageSeconds)}</p> : null}
+          {buses.length > 0 ? buses.map((bus, index) => (
+            <BusObservation
+              key={`${bus.plate}-${bus.stationCode}-${index}`}
+              bus={bus}
+              routeId={routeId}
+              directionId={directionId}
+              direction={direction}
+              repository={repository}
+              catalog={catalog}
+              stationNames={stationNames}
+            />
+          )) : <p className="empty-copy">目前沒有觀測中的巴士。</p>}
+          {isDebugPanelEnabled(devMode) ? <DebugPanel data={data} /> : null}
+        </>
+      ) : null}
     </section>
   );
 }
@@ -237,7 +256,7 @@ function BusObservation({ bus, routeId, directionId, direction, repository, cata
     <article className="bus-observation">
       <BusFront aria-hidden="true" className="bus-observation-icon" size={35} strokeWidth={1.8} />
       <div className="bus-observation-copy">
-        <strong>{bus.plate || '未提供車牌'}</strong>
+        <strong>{bus.plate.trim() ? maskIdentifier(bus.plate) : '未提供車牌'}</strong>
         <span>目前：{bus.stationCode} {stationName}</span>
         <span className="estimated-label">{messages.estimatedPosition}</span>
         <span className="eta-label">{eta === null ? messages.etaUnavailable : `約 ${eta} 分鐘到 ${target?.nameCn ?? ''}`}</span>
@@ -259,7 +278,7 @@ interface StopsPanelProps {
 function StopsPanel({ direction, buses, stationNames }: StopsPanelProps) {
   const observed = new Set(buses.map((bus) => bus.stationCode));
   return (
-    <section className="stops-panel" aria-label={messages.stops}>
+    <section className="stops-panel" role="tabpanel" id="stops-panel" aria-labelledby="stops-tab" aria-label={messages.stops} tabIndex={0}>
       {direction.stopIds.map((stopId, index) => (
         <div className={`route-stop-row${observed.has(stopId) ? ' is-observed' : ''}`} key={stopId}>
           <span className="route-stop-index">{index + 1}</span>
@@ -282,8 +301,8 @@ function DebugPanel({ data }: { data: NonNullable<ReturnType<typeof useRealtimeP
         <dt>{messages.lastObservation}</dt><dd>{data.updatedAt}</dd>
         {data.buses.map((bus, index) => (
           <div className="debug-bus" key={`${bus.plate}-${index}`}>
-            <dt>plate</dt><dd>{bus.plate}</dd>
-            <dt>staCode</dt><dd>{bus.stationCode}</dd>
+            <dt>plate</dt><dd>{maskIdentifier(bus.plate)}</dd>
+            <dt>staCode</dt><dd>{maskIdentifier(bus.stationCode)}</dd>
             <dt>speed</dt><dd>{bus.speedKph ?? '—'}</dd>
             <dt>status</dt><dd>{bus.status ?? '—'}</dd>
           </div>

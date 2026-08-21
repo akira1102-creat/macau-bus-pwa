@@ -95,7 +95,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
   width: min(100%, var(--content-width));
   min-height: calc(100dvh - 156px);
   margin: 0 auto;
-  padding: 0 20px 112px;
+  padding: 0 20px calc(112px + env(safe-area-inset-bottom));
 }
 
 .icon-button {
@@ -120,7 +120,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
   z-index: 20;
   display: flex;
   justify-content: center;
-  min-height: 82px;
+  min-height: calc(82px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
   border-top: 1px solid var(--color-divider);
   background: color-mix(in srgb, var(--color-surface) 94%, transparent);
   backdrop-filter: blur(18px);
@@ -261,7 +262,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
 
 .stop-list-item {
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  flex-direction: column;
   width: 100%;
   min-height: 82px;
   gap: 17px;
@@ -272,6 +274,42 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
   background: transparent;
   text-align: left;
 }
+
+.stop-list-main {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 60px;
+  gap: 17px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.stop-list-main:not(.is-static) { cursor: pointer; }
+.stop-list-main:not(.is-static):hover .stop-list-copy strong { color: var(--color-jade); }
+
+.stop-route-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: 65px;
+}
+
+.stop-route-option {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 5px 12px;
+  border: 1px solid var(--color-jade);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-jade-dark);
+  font-weight: 650;
+}
+
+.stop-route-option:hover { background: var(--color-jade-soft); }
 
 .stop-icon {
   display: inline-flex;
@@ -303,7 +341,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
 }
 
 .radius-tabs button {
-  min-height: 40px;
+  min-width: 64px;
+  min-height: 44px;
   padding: 4px 12px;
   border: 1px solid var(--color-divider);
   border-radius: 999px;
@@ -389,6 +428,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
 .legend-line { width: 32px; height: 4px; border-radius: 999px; background: var(--color-jade); }
 .legend-dot { width: 15px; height: 15px; border: 3px solid var(--color-jade); border-radius: 50%; background: #fff; }
 .map-location-button { position: absolute; right: 15px; bottom: 15px; z-index: 500; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--color-divider); border-radius: 10px; background: var(--color-surface); color: var(--color-jade-dark); box-shadow: 0 2px 8px var(--color-shadow); }
+.leaflet-control-zoom a { width: 44px !important; height: 44px !important; line-height: 44px !important; font-size: 1.35rem; }
 .map-location-message { margin: 0; padding: 8px 20px; color: var(--color-muted); font-size: 0.9rem; }
 .map-bus-marker-wrap { display: grid; place-items: center; border: 0; background: transparent; }
 .map-bus-marker { display: grid; width: 32px; height: 32px; place-items: center; border: 3px solid #fff; border-radius: 50%; background: var(--color-jade); color: #fff; font-size: 1.15rem; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2); }

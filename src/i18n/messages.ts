@@ -14,6 +14,7 @@ export const messages = {
   noRecent: '尚未查看路線',
   routeDirectory: '所有路線',
   routeMap: '路線地圖',
+  mapPickerTitle: '地圖（選擇路線）',
   direction: '方向',
   realtime: '實時巴士',
   stops: '站點',

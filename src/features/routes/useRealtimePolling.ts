@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DirectionId, RealtimeRouteResponse } from '../../../shared/transit-contract';
 
 export interface RealtimeClientLike {
-  getRealtimeRoute: (route: string, direction: DirectionId) => Promise<RealtimeRouteResponse>;
+  getRealtimeRoute: (route: string, direction: DirectionId, signal?: AbortSignal) => Promise<RealtimeRouteResponse>;
 }
 
 export type RealtimePollingStatus = 'loading' | 'refreshing' | 'ready' | 'error';
@@ -34,13 +34,28 @@ export function useRealtimePolling(
   const [error, setError] = useState<unknown>(null);
   const dataRef = useRef<RealtimeRouteResponse | null>(null);
   const requestId = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
+  const inFlightRef = useRef(false);
+
+  const abortInFlight = useCallback(() => {
+    requestId.current += 1;
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    inFlightRef.current = false;
+  }, []);
 
   const load = useCallback(async () => {
+    if (inFlightRef.current) {
+      return;
+    }
+    inFlightRef.current = true;
+    const controller = new AbortController();
+    controllerRef.current = controller;
     const currentRequest = ++requestId.current;
     setStatus(dataRef.current ? 'refreshing' : 'loading');
     setError(null);
     try {
-      const next = await client.getRealtimeRoute(route, direction);
+      const next = await client.getRealtimeRoute(route, direction, controller.signal);
       if (currentRequest !== requestId.current) {
         return;
       }
@@ -48,21 +63,26 @@ export function useRealtimePolling(
       setData(next);
       setStatus('ready');
     } catch (nextError) {
-      if (currentRequest !== requestId.current) {
+      if (currentRequest !== requestId.current || controller.signal.aborted) {
         return;
       }
       setError(nextError);
       setStatus('error');
+    } finally {
+      if (controllerRef.current === controller) {
+        controllerRef.current = null;
+        inFlightRef.current = false;
+      }
     }
   }, [client, direction, route]);
 
   useEffect(() => {
-    requestId.current += 1;
+    abortInFlight();
     setStatus('loading');
     dataRef.current = null;
     setData(null);
     setError(null);
-  }, [direction, route]);
+  }, [abortInFlight, direction, route]);
 
   useEffect(() => {
     if (!enabled) {
@@ -93,6 +113,7 @@ export function useRealtimePolling(
         startPolling();
       } else {
         clearPolling();
+        abortInFlight();
       }
     };
 
@@ -100,10 +121,10 @@ export function useRealtimePolling(
     document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       clearPolling();
-      requestId.current += 1;
+      abortInFlight();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [enabled, intervalMs, load]);
+  }, [abortInFlight, enabled, intervalMs, load]);
 
   return { status, data, error, refresh: () => void load() };
 }

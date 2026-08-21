@@ -93,8 +93,11 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
   const openRoute = useCallback((routeId: string) => {
     navigateTo({ tab: 'routes', routeId });
   }, []);
+  const openMapRoute = useCallback((routeId: string) => {
+    navigateTo({ tab: 'map', routeId });
+  }, []);
   const changeTab = useCallback((tab: AppTab) => {
-    navigateTo(tab === 'routes' && appRoute.routeId ? { tab, routeId: appRoute.routeId } : { tab });
+    navigateTo((tab === 'routes' || tab === 'map') && appRoute.routeId ? { tab, routeId: appRoute.routeId } : { tab });
   }, [appRoute.routeId]);
   const handleThemeChange = (nextTheme: Theme) => {
     const next = preferences.setTheme(nextTheme);
@@ -102,7 +105,7 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
   };
 
   const selectedRouteId = appRoute.routeId;
-  const routeDetail = appRoute.tab === 'routes' && selectedRouteId !== undefined && repository !== null;
+  const routeDetail = (appRoute.tab === 'routes' || appRoute.tab === 'map') && selectedRouteId !== undefined && repository !== null;
   return (
     <AppShell activeTab={appRoute.tab} onTabChange={changeTab} showHeader={!routeDetail}>
       {catalogState.status === 'loading' ? <StateMessage kind="loading">{messages.catalogLoading}</StateMessage> : null}
@@ -117,14 +120,14 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
             preferences={preferences}
             realtimeClient={realtimeClient}
             getCurrentPosition={getCurrentPositionOnce}
-            onBack={() => navigateTo({ tab: 'routes' })}
+            onBack={() => navigateTo({ tab: appRoute.tab === 'map' ? 'map' : 'routes' })}
           />
         ) : appRoute.tab === 'nearby' ? (
           <HomePage catalog={catalogState.catalog} repository={repository} preferences={preferences} onOpenRoute={openRoute} getCurrentPosition={getCurrentPositionOnce} />
         ) : appRoute.tab === 'routes' ? (
           <RouteDirectoryPage catalog={catalogState.catalog} preferences={preferences} onOpenRoute={openRoute} title={messages.routeDirectory} emptyCopy="找不到符合的路線。" />
         ) : appRoute.tab === 'map' ? (
-          <RouteDirectoryPage catalog={catalogState.catalog} preferences={preferences} onOpenRoute={openRoute} title={messages.routeMap} emptyCopy="暫時沒有可顯示的路線。" />
+          <RouteDirectoryPage catalog={catalogState.catalog} preferences={preferences} onOpenRoute={openMapRoute} title={messages.mapPickerTitle} emptyCopy="暫時沒有可顯示的路線。" />
         ) : appRoute.tab === 'favorites' ? (
           <RouteDirectoryPage catalog={catalogState.catalog} preferences={preferences} onOpenRoute={openRoute} onlyFavorites title={messages.favoritesRoutes} />
         ) : (

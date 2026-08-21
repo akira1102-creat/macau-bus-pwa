@@ -86,6 +86,11 @@ export async function getRealtimeRoute(
 
 export function createRealtimeApiClient(options: RealtimeApiClientOptions = {}) {
   return {
-    getRealtimeRoute: (route: string, direction: DirectionId) => getRealtimeRoute(route, direction, options),
+    getRealtimeRoute: (route: string, direction: DirectionId, signal?: AbortSignal) => {
+      if (signal === undefined) {
+        return getRealtimeRoute(route, direction, options);
+      }
+      return getRealtimeRoute(route, direction, { ...options, signal });
+    },
   };
 }
