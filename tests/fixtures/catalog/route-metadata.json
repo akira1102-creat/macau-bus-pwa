@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "routes": {
+    "1": {
+      "nameCht": "測試線",
+      "namePor": "LINHA TESTE",
+      "directionNames": {
+        "0": "甲 → 乙",
+        "1": "乙 → 甲"
+      },
+      "schedule": {}
+    }
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-21T00:00:00.000Z",
+  "provenance": {
+    "sourceRepository": "https://github.com/example/macau-bus-data",
+    "sourceRef": "fixture-ref-20260821",
+    "syncedAt": "2026-08-21T00:00:00.000Z",
+    "files": [
+      {
+        "name": "bus-stops.json",
+        "url": "https://raw.example.test/fixture-ref-20260821/bus-stops.json",
+        "ref": "fixture-ref-20260821",
+        "syncedAt": "2026-08-21T00:00:00.000Z",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "name": "operators.json",
+        "url": "https://raw.example.test/fixture-ref-20260821/operators.json",
+        "ref": "fixture-ref-20260821",
+        "syncedAt": "2026-08-21T00:00:00.000Z",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+        "name": "route-metadata.json",
+        "url": "https://raw.example.test/fixture-ref-20260821/route-metadata.json",
+        "ref": "fixture-ref-20260821",
+        "syncedAt": "2026-08-21T00:00:00.000Z",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      {
+        "name": "route-stops.json",
+        "url": "https://raw.example.test/fixture-ref-20260821/route-stops.json",
+        "ref": "fixture-ref-20260821",
+        "syncedAt": "2026-08-21T00:00:00.000Z",
+        "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      {
+        "name": "segment_times.json",
+        "url": "https://raw.example.test/fixture-ref-20260821/segment_times.json",
+        "ref": "fixture-ref-20260821",
+        "syncedAt": "2026-08-21T00:00:00.000Z",
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ]
+  },
+  "routes": [
+    {
+      "id": "1",
+      "name": "1",
+      "displayName": "測試線",
+      "operator": "測試巴士",
+      "directions": [
+        {
+          "id": 0,
+          "name": "甲 → 乙",
+          "stopIds": ["M1", "M2", "M3"]
+        },
+        {
+          "id": 1,
+          "name": "乙 → 甲",
+          "stopIds": ["M3", "M2", "M1"]
+        }
+      ]
+    }
+  ],
+  "stops": [
+    {
+      "id": "M1",
+      "name": "M1",
+      "nameCn": "甲站",
+      "nameEn": "Alpha Stop",
+      "namePor": "Paragem Alfa",
+      "coordinates": [113.5401, 22.1901],
+      "routeIds": ["1"]
+    },
+    {
+      "id": "M2",
+      "name": "M2",
+      "nameCn": "中央站",
+      "nameEn": "Central Stop",
+      "namePor": "Paragem Central",
+      "coordinates": [113.5411, 22.1911],
+      "routeIds": ["1"]
+    },
+    {
+      "id": "M3",
+      "name": "M3",
+      "nameCn": "乙站",
+      "nameEn": "Beta Stop",
+      "namePor": "Paragem Beta",
+      "coordinates": [113.5421, 22.1921],
+      "routeIds": ["1"]
+    }
+  ],
+  "segmentTimes": [
+    {
+      "route": "1",
+      "direction": 0,
+      "fromStopId": "M1",
+      "toStopId": "M2",
+      "averageSeconds": 60,
+      "medianSeconds": 55,
+      "p90Seconds": 90,
+      "samples": 2
+    }
+  ]
+}

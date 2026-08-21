@@ -1,0 +1,29 @@
+[
+  {
+    "id": "M1",
+    "name": "M1",
+    "nameCn": "甲站",
+    "nameEn": "Alpha Stop",
+    "namePor": "Paragem Alfa",
+    "coordinates": [113.5401, 22.1901],
+    "routeIds": ["1"]
+  },
+  {
+    "id": "M2",
+    "name": "M2",
+    "nameCn": "中央站",
+    "nameEn": "Central Stop",
+    "namePor": "Paragem Central",
+    "coordinates": [113.5411, 22.1911],
+    "routeIds": ["1"]
+  },
+  {
+    "id": "M3",
+    "name": "M3",
+    "nameCn": "乙站",
+    "nameEn": "Beta Stop",
+    "namePor": "Paragem Beta",
+    "coordinates": [113.5421, 22.1921],
+    "routeIds": ["1"]
+  }
+]
