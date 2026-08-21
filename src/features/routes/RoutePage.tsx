@@ -110,6 +110,7 @@ export function RoutePage({
           <ArrowLeft aria-hidden="true" size={29} strokeWidth={1.8} />
         </button>
         <div className="route-title">
+          <span className="route-number" aria-label={`路線 ${route.id}`}>路線 {route.id}</span>
           <h1>{route.displayName}</h1>
           <p>{direction.name}</p>
           <span><BusFront aria-hidden="true" size={24} strokeWidth={1.8} />{route.operator}</span>

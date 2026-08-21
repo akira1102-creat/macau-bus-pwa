@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -76,6 +78,22 @@ describe('RoutePage', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('shows the route number above the route identity without shrinking the touch targets', async () => {
+    const getRealtimeRoute = vi.fn().mockResolvedValue(realtime());
+    renderRoute(getRealtimeRoute);
+
+    const header = screen.getByRole('heading', { name: '測試線' }).closest('header');
+    expect(header).not.toBeNull();
+    expect(within(header!).getByText('路線 1')).toBeVisible();
+    expect(screen.getByRole('button', { name: '返回' })).toHaveClass('icon-button');
+    expect(screen.getByRole('button', { name: '收藏路線 1' })).toHaveClass('icon-button');
+  });
+
+  it('styles the route number as a compact jade badge', () => {
+    const styles = readFileSync(resolve(process.cwd(), 'src/styles/app.css'), 'utf8');
+    expect(styles).toMatch(/\.route-title \.route-number\s*\{[^}]*min-height:\s*28px[^}]*background:\s*var\(--color-jade-soft\)/s);
   });
 
   it('switches direction tabs and keeps the catalog station order', async () => {
