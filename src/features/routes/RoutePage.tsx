@@ -11,6 +11,7 @@ import { StateMessage } from '../../components/StateMessage';
 import { useRealtimePolling, type RealtimeClientLike } from './useRealtimePolling';
 
 const LazyRouteMap = lazy(() => import('../map/RouteMap'));
+const LazyDevDebugPanel = import.meta.env.DEV ? lazy(() => import('./dev-debug')) : null;
 
 export interface RoutePageProps {
   routeId: string;
@@ -220,7 +221,11 @@ function RealtimePanel({ routeId, directionId, direction, buses, status, data, r
               stationNames={stationNames}
             />
           )) : <p className="empty-copy">目前沒有觀測中的巴士。</p>}
-          {isDebugPanelEnabled(devMode) ? <DebugPanel data={data} /> : null}
+          {import.meta.env.DEV && devMode && LazyDevDebugPanel ? (
+            <Suspense fallback={null}>
+              <LazyDevDebugPanel routeId={routeId} directionId={directionId} data={data} />
+            </Suspense>
+          ) : null}
         </>
       ) : null}
     </section>
@@ -289,26 +294,5 @@ function StopsPanel({ direction, buses, stationNames }: StopsPanelProps) {
         </div>
       ))}
     </section>
-  );
-}
-
-function DebugPanel({ data }: { data: NonNullable<ReturnType<typeof useRealtimePolling>['data']> }) {
-  return (
-    <details className="debug-panel">
-      <summary>{messages.debug}</summary>
-      <dl>
-        <dt>route</dt><dd>{data.route}</dd>
-        <dt>direction</dt><dd>{data.direction}</dd>
-        <dt>{messages.lastObservation}</dt><dd>{data.updatedAt}</dd>
-        {data.buses.map((bus, index) => (
-          <div className="debug-bus" key={`${bus.plate}-${index}`}>
-            <dt>plate</dt><dd>{maskIdentifier(bus.plate)}</dd>
-            <dt>staCode</dt><dd>{maskIdentifier(bus.stationCode)}</dd>
-            <dt>speed</dt><dd>{bus.speedKph ?? '—'}</dd>
-            <dt>status</dt><dd>{bus.status ?? '—'}</dd>
-          </div>
-        ))}
-      </dl>
-    </details>
   );
 }

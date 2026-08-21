@@ -77,6 +77,7 @@ function renderRoute(
 describe('RoutePage', () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -151,6 +152,37 @@ describe('RoutePage', () => {
     expect(within(panel!).queryByText('M1')).not.toBeInTheDocument();
     expect(within(panel!).getByText('A••4')).toBeVisible();
     expect(within(panel!).getByText('••')).toBeVisible();
+  });
+
+  it('fetches and renders the masked development debug response only when enabled', async () => {
+    const debugFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        route: '1',
+        direction: 0,
+        buses: [{ ...realtime().buses[0], plate: '[MASKED]' }],
+        raw: { debugOnly: 'masked-response' },
+      }),
+    });
+    vi.stubGlobal('fetch', debugFetch);
+    const getRealtimeRoute = vi.fn().mockResolvedValue(realtime());
+    renderRoute(getRealtimeRoute, { devMode: true });
+
+    const summary = await screen.findByText('開發診斷');
+    await waitFor(() => expect(debugFetch).toHaveBeenCalledWith('/api/debug/dsat/1/0', expect.objectContaining({ method: 'GET' })));
+    fireEvent.click(summary);
+    expect(await screen.findByText(/masked-response/)).toBeVisible();
+    expect(screen.queryByText('AB1234')).not.toBeInTheDocument();
+  });
+
+  it('does not fetch the development debug endpoint when dev mode is disabled', async () => {
+    const debugFetch = vi.fn();
+    vi.stubGlobal('fetch', debugFetch);
+    const getRealtimeRoute = vi.fn().mockResolvedValue(realtime());
+    renderRoute(getRealtimeRoute, { devMode: false });
+
+    await screen.findByText('位置按站點顯示');
+    expect(debugFetch).not.toHaveBeenCalled();
   });
 
   it('exposes direction and data tab panels through aria controls', async () => {

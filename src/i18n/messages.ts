@@ -41,8 +41,6 @@ export const messages = {
   favoriteRoute: (routeId: string) => `收藏路線 ${routeId}`,
   openRoute: (routeId: string) => `開啟路線 ${routeId}`,
   openMap: (routeId: string) => `查看 ${routeId} 路線地圖`,
-  debug: '開發診斷',
-  lastObservation: '最近觀測',
   location: '位置',
   speed: '速度',
   station: '站點',

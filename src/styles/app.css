@@ -441,6 +441,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
 .legend-line { width: 32px; height: 4px; border-radius: 999px; background: var(--color-jade); }
 .legend-dot { width: 15px; height: 15px; border: 3px solid var(--color-jade); border-radius: 50%; background: #fff; }
 .map-location-button { position: absolute; right: 15px; bottom: 15px; z-index: 500; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--color-divider); border-radius: 10px; background: var(--color-surface); color: var(--color-jade-dark); box-shadow: 0 2px 8px var(--color-shadow); }
+.map-status-banner { position: absolute; top: 15px; right: 15px; left: 15px; z-index: 501; margin: 0; padding: 10px 12px; border: 1px solid var(--color-amber); border-radius: 12px; background: color-mix(in srgb, var(--color-surface) 94%, transparent); color: var(--color-text); font-size: 0.95rem; }
 .leaflet-control-zoom a { width: 44px !important; height: 44px !important; line-height: 44px !important; font-size: 1.35rem; }
 .map-location-message { margin: 0; padding: 8px 20px; color: var(--color-muted); font-size: 0.9rem; }
 .map-bus-marker-wrap { display: grid; place-items: center; border: 0; background: transparent; }
@@ -468,11 +469,6 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
 .route-stop-copy strong { font-size: 1.1rem; }
 .route-stop-copy span { color: var(--color-muted); }
 .observed-label { color: var(--color-jade-dark); font-size: 0.85rem; }
-.debug-panel { margin-top: 20px; border-top: 1px solid var(--color-divider); color: var(--color-muted); }
-.debug-panel summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
-.debug-panel dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0 0 14px; font-family: ui-monospace, monospace; font-size: 0.8rem; }
-.debug-panel dd { margin: 0; color: var(--color-text); overflow-wrap: anywhere; }
-.debug-bus { display: contents; }
 .route-not-found { padding-top: 18px; }
 .back-button { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--color-jade-dark); font-weight: 650; }
 
