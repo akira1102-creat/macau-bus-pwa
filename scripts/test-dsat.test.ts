@@ -5,9 +5,30 @@ import {
   DSAT_ORIGIN,
   DSAT_REFERER,
   DSAT_TIMEOUT_MS,
+  DsatProbeError,
   buildDsatProbeRequest,
   fetchDsatProbe,
+  formatDsatProbeError,
+  summarizeDsatResponse,
 } from './test-dsat';
+
+async function captureAsyncError(task: Promise<unknown>): Promise<unknown> {
+  try {
+    await task;
+    return undefined;
+  } catch (error) {
+    return error;
+  }
+}
+
+function captureSyncError(task: () => unknown): unknown {
+  try {
+    task();
+    return undefined;
+  } catch (error) {
+    return error;
+  }
+}
 
 describe('DSAT probe request', () => {
   it('uses the current form field order, origin/referer and a fixed known token vector', () => {
@@ -58,8 +79,22 @@ describe('DSAT probe request', () => {
       headers: { 'content-length': String(DSAT_MAX_RESPONSE_BYTES + 1) },
     }));
 
-    await expect(fetchDsatProbe(request, { fetch: fetcher })).rejects.toThrow(/回應|response|size/i);
+    const error = await captureAsyncError(fetchDsatProbe(request, { fetch: fetcher }));
+    expect(error).toMatchObject({ code: 'response-too-large' });
+    expect(formatDsatProbeError(error)).toBe('DSAT 測試失敗：回應超過大小限制。');
     expect(DSAT_MAX_RESPONSE_BYTES).toBeGreaterThan(0);
+  });
+
+  it('rejects a response without a readable body stream before any unbounded text fallback', async () => {
+    const request = buildDsatProbeRequest({ route: '1', direction: 0 });
+    const response = new Response(null, { status: 200 });
+    const text = vi.spyOn(response, 'text');
+    const fetcher = vi.fn(async () => response);
+
+    const error = await captureAsyncError(fetchDsatProbe(request, { fetch: fetcher }));
+    expect(error).toMatchObject({ code: 'missing-body' });
+    expect(text).not.toHaveBeenCalled();
+    expect(formatDsatProbeError(error)).toBe('DSAT 測試失敗：回應沒有可讀取的內容。');
   });
 
   it('aborts a hanging response body read under the same timeout', async () => {
@@ -85,5 +120,36 @@ describe('DSAT probe request', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('maps abort and network errors to stable Traditional Chinese without raw English', () => {
+    expect(formatDsatProbeError(new DOMException('English timeout detail', 'TimeoutError'))).toBe('DSAT 測試失敗：請求逾時或已中止。');
+    expect(formatDsatProbeError(new TypeError('fetch failed: private network detail'))).toBe('DSAT 測試失敗：網絡連線失敗。');
+  });
+
+  it('maps HTTP, application header, invalid JSON, and missing-body failures with safe codes', () => {
+    expect(formatDsatProbeError(new DsatProbeError('http', { status: 503 }))).toBe('DSAT 測試失敗：上游 HTTP 狀態碼 503。');
+    expect(formatDsatProbeError(new DsatProbeError('application-header', { status: 200, applicationHeader: '1200' }))).toBe('DSAT 測試失敗：DSAT application header 1200（HTTP 200）。');
+    expect(formatDsatProbeError(new DsatProbeError('invalid-json'))).toBe('DSAT 測試失敗：回應不是有效 JSON。');
+    expect(formatDsatProbeError(new DsatProbeError('missing-body'))).toBe('DSAT 測試失敗：回應沒有可讀取的內容。');
+  });
+
+  it('normalizes only successful application header 000 responses', () => {
+    const success = summarizeDsatResponse(
+      new Response('', { status: 200 }),
+      JSON.stringify({ header: '000', data: { routeInfo: [{ busInfo: [{ busPlate: 'MASKED' }] }] } }),
+    );
+    expect(success).toEqual({ status: 200, applicationHeader: '000', routeInfo: 1, busCount: 1 });
+
+    const httpError = captureSyncError(() => summarizeDsatResponse(new Response('', { status: 503 }), '<html>upstream</html>'));
+    expect(httpError).toBeInstanceOf(DsatProbeError);
+    expect(formatDsatProbeError(httpError)).toBe('DSAT 測試失敗：上游 HTTP 狀態碼 503。');
+    expect(formatDsatProbeError(httpError)).not.toMatch(/upstream|html/i);
+    const jsonError = captureSyncError(() => summarizeDsatResponse(new Response('', { status: 200 }), '{bad json'));
+    expect(jsonError).toBeInstanceOf(DsatProbeError);
+    expect(formatDsatProbeError(jsonError)).toBe('DSAT 測試失敗：回應不是有效 JSON。');
+    const applicationError = captureSyncError(() => summarizeDsatResponse(new Response('', { status: 200 }), JSON.stringify({ header: '1200' })));
+    expect(applicationError).toBeInstanceOf(DsatProbeError);
+    expect(formatDsatProbeError(applicationError)).toBe('DSAT 測試失敗：DSAT application header 1200（HTTP 200）。');
   });
 });

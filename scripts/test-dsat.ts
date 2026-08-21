@@ -29,6 +29,32 @@ export interface DsatProbeResult {
   text: string;
 }
 
+export type DsatProbeErrorCode =
+  | 'http'
+  | 'application-header'
+  | 'invalid-json'
+  | 'missing-body'
+  | 'response-too-large';
+
+export interface DsatProbeErrorDetails {
+  status?: number;
+  applicationHeader?: string;
+}
+
+export class DsatProbeError extends Error {
+  readonly code: DsatProbeErrorCode;
+  readonly status: number | undefined;
+  readonly applicationHeader: string | undefined;
+
+  constructor(code: DsatProbeErrorCode, details: DsatProbeErrorDetails = {}) {
+    super(`DSAT probe failed: ${code}`);
+    this.name = 'DsatProbeError';
+    this.code = code;
+    this.status = details.status;
+    this.applicationHeader = details.applicationHeader;
+  }
+}
+
 function pad(value: number): string {
   return String(value).padStart(2, '0');
 }
@@ -84,8 +110,8 @@ function timeoutError(): DOMException {
   return new DOMException('DSAT 請求逾時', 'TimeoutError');
 }
 
-function responseLimitError(maxBytes: number): Error {
-  return new Error(`DSAT 回應超過大小限制（${maxBytes} bytes）`);
+function responseLimitError(): DsatProbeError {
+  return new DsatProbeError('response-too-large');
 }
 
 function abortReason(signal: AbortSignal): unknown {
@@ -100,30 +126,14 @@ export async function readBoundedDsatResponse(
   const contentLengthHeader = response.headers.get('content-length');
   const contentLength = contentLengthHeader ? Number.parseInt(contentLengthHeader, 10) : Number.NaN;
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    throw responseLimitError(maxBytes);
+    throw responseLimitError();
   }
   if (signal.aborted) {
     throw abortReason(signal);
   }
 
   if (!response.body) {
-    let onAbort: (() => void) | undefined;
-    const abortPromise = new Promise<never>((_resolve, reject) => {
-      onAbort = () => reject(abortReason(signal));
-      signal.addEventListener('abort', onAbort, { once: true });
-    });
-    try {
-      const text = await Promise.race([response.text(), abortPromise]);
-      const size = new TextEncoder().encode(text).byteLength;
-      if (size > maxBytes) {
-        throw responseLimitError(maxBytes);
-      }
-      return text;
-    } finally {
-      if (onAbort) {
-        signal.removeEventListener('abort', onAbort);
-      }
-    }
+    throw new DsatProbeError('missing-body');
   }
 
   const reader = response.body.getReader();
@@ -150,7 +160,7 @@ export async function readBoundedDsatResponse(
         totalBytes += result.value.byteLength;
         if (totalBytes > maxBytes) {
           await reader.cancel();
-          throw responseLimitError(maxBytes);
+          throw responseLimitError();
         }
         chunks.push(result.value);
       }
@@ -172,6 +182,87 @@ export async function readBoundedDsatResponse(
     offset += chunk.byteLength;
   }
   return new TextDecoder('utf-8').decode(bytes);
+}
+
+export interface DsatProbeSummary {
+  status: number;
+  applicationHeader: string;
+  routeInfo: number;
+  busCount: number;
+}
+
+function safeApplicationHeader(value: unknown): string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(value) ? value : 'unknown';
+}
+
+export function summarizeDsatResponse(response: Response, text: string): DsatProbeSummary {
+  if (!response.ok) {
+    throw new DsatProbeError('http', { status: response.status });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    throw new DsatProbeError('invalid-json', { status: response.status });
+  }
+
+  const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : undefined;
+  const applicationHeader = safeApplicationHeader(record?.header);
+  if (applicationHeader !== '000') {
+    throw new DsatProbeError('application-header', {
+      status: response.status,
+      applicationHeader,
+    });
+  }
+  const data = record?.data && typeof record.data === 'object' && !Array.isArray(record.data)
+    ? record.data as Record<string, unknown>
+    : undefined;
+  const routeInfo = Array.isArray(data?.routeInfo) ? data.routeInfo.length : 0;
+  const busCount = Array.isArray(data?.routeInfo)
+    ? data.routeInfo.reduce((count, station) => {
+      if (!station || typeof station !== 'object' || Array.isArray(station)) return count;
+      const buses = (station as Record<string, unknown>).busInfo;
+      return count + (Array.isArray(buses) ? buses.length : 0);
+    }, 0)
+    : 0;
+  return { status: response.status, applicationHeader, routeInfo, busCount };
+}
+
+function safeStatus(value: number | undefined): string {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599
+    ? String(value)
+    : '未知';
+}
+
+export function formatDsatProbeError(error: unknown): string {
+  const prefix = 'DSAT 測試失敗：';
+  if (error instanceof DsatProbeError) {
+    switch (error.code) {
+      case 'http':
+        return `${prefix}上游 HTTP 狀態碼 ${safeStatus(error.status)}。`;
+      case 'application-header':
+        return `${prefix}DSAT application header ${safeApplicationHeader(error.applicationHeader)}（HTTP ${safeStatus(error.status)}）。`;
+      case 'invalid-json':
+        return `${prefix}回應不是有效 JSON。`;
+      case 'missing-body':
+        return `${prefix}回應沒有可讀取的內容。`;
+      case 'response-too-large':
+        return `${prefix}回應超過大小限制。`;
+    }
+  }
+  if (error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+    return `${prefix}請求逾時或已中止。`;
+  }
+  if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+    return `${prefix}請求逾時或已中止。`;
+  }
+  if (error instanceof TypeError || (error instanceof Error && error.name === 'TypeError')) {
+    return `${prefix}網絡連線失敗。`;
+  }
+  return `${prefix}無法取得 DSAT 資料。`;
 }
 
 export async function fetchDsatProbe(
@@ -211,32 +302,13 @@ async function main(): Promise<void> {
 
   const request = buildDsatProbeRequest({ route, direction });
   const { response, text } = await fetchDsatProbe(request);
-  let parsed: unknown = undefined;
-  try {
-    parsed = JSON.parse(text) as unknown;
-  } catch {
-    // The endpoint may return an HTML error page; do not print its contents.
-  }
-  const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
-  const applicationHeader = record && typeof record.header === 'string' ? record.header : 'unknown';
-  const data = record?.data && typeof record.data === 'object' && !Array.isArray(record.data) ? record.data as Record<string, unknown> : undefined;
-  const routeInfo = Array.isArray(data?.routeInfo) ? data.routeInfo.length : 0;
-  const busCount = Array.isArray(data?.routeInfo)
-    ? data.routeInfo.reduce((count, station) => {
-      if (!station || typeof station !== 'object' || Array.isArray(station)) return count;
-      const buses = (station as Record<string, unknown>).busInfo;
-      return count + (Array.isArray(buses) ? buses.length : 0);
-    }, 0)
-    : 0;
-  console.log(`DSAT 測試 HTTP ${response.status}；application header=${applicationHeader}；站點=${routeInfo}；觀測=${busCount}。`);
-  if (!response.ok || applicationHeader !== '000') {
-    process.exitCode = 1;
-  }
+  const summary = summarizeDsatResponse(response, text);
+  console.log(`DSAT 測試 HTTP ${summary.status}；application header=${summary.applicationHeader}；站點=${summary.routeInfo}；觀測=${summary.busCount}。`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main().catch((error: unknown) => {
-    console.error(`DSAT 測試失敗：${error instanceof Error ? error.message : String(error)}`);
+    console.error(formatDsatProbeError(error));
     process.exitCode = 1;
   });
 }
