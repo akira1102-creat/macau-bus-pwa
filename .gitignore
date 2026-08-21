@@ -1,0 +1,13 @@
+.superpowers/
+.worktrees/
+node_modules/
+dist/
+dist-server/
+coverage/
+playwright-report/
+test-results/
+.env
+data/upstream/
+public/data/catalog.json
+public/data/provenance.json
+
