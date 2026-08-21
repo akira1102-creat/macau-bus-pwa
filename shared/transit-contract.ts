@@ -39,6 +39,28 @@ export const RouteSummarySchema = z.object({
 });
 export type RouteSummary = z.infer<typeof RouteSummarySchema>;
 
+export const RealtimeBusSchema = z.object({
+  plate: z.string(),
+  stationCode: z.string(),
+  speedKph: z.number().finite().nonnegative().nullable(),
+  status: z.string().nullable(),
+  passengerFlow: z.string().nullable(),
+  busType: z.string().nullable(),
+  facilities: z.string().nullable(),
+});
+export type RealtimeBus = z.infer<typeof RealtimeBusSchema>;
+
+export const RealtimeRouteResponseSchema = z.object({
+  route: z.string().trim().min(1),
+  direction: DirectionIdSchema,
+  updatedAt: z.string().datetime({ offset: true }),
+  ageSeconds: z.number().int().nonnegative(),
+  stale: z.boolean(),
+  source: z.literal('DSAT observation'),
+  buses: z.array(RealtimeBusSchema),
+});
+export type RealtimeRouteResponse = z.infer<typeof RealtimeRouteResponseSchema>;
+
 export const SegmentTimeSchema = z.object({
   route: z.string().trim().min(1),
   direction: DirectionIdSchema,

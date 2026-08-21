@@ -9,12 +9,14 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "data:sync": "tsx scripts/sync-static-data.ts",
     "dsat:test": "tsx scripts/test-dsat.ts"
   },
   "dependencies": {
+    "fastify": "^5.12.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {

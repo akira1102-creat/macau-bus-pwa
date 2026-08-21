@@ -1,0 +1,32 @@
+{
+  "header": "000",
+  "data": {
+    "routeInfo": [
+      {
+        "staCode": "M1",
+        "busInfo": [
+          {
+            "busType": "普通",
+            "busCode": "SANITIZED-001",
+            "busPlate": "SANITIZED-PLATE-001",
+            "status": "行駛中",
+            "isFacilities": "1",
+            "passengerFlow": "",
+            "speed": "12.5",
+            "unmodeledField": "keep only in development raw debug"
+          }
+        ]
+      },
+      {
+        "staCode": "M2",
+        "busInfo": [
+          {
+            "busPlate": "SANITIZED-PLATE-002",
+            "speed": ""
+          }
+        ]
+      }
+    ]
+  },
+  "unmodeledTopLevel": true
+}
