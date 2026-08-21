@@ -1,16 +1,16 @@
-# Design QA — 澳門實時巴士 PWA v0.2.1
+# Design QA — 澳門實時巴士 PWA v0.2.2
 
 ## Comparison target and evidence
 
 - Source visual truth: `docs/design/home-concept.png`, `docs/design/route-concept.png`.
 - Latest implementation: `http://127.0.0.1:4173/` and `http://127.0.0.1:4173/?tab=routes&route=26A`.
 - Implementation screenshots:
-  - `C:\Users\AKR\.codex\visualizations\2026\08\21\01a021b9-fb8d-7b31-a8a8-e3117686f59f\macau-bus-home-390x844-v2.png`
-  - `C:\Users\AKR\.codex\visualizations\2026\08\21\01a021b9-fb8d-7b31-a8a8-e3117686f59f\macau-bus-route-390x844-v2.png`
-  - `C:\Users\AKR\.codex\visualizations\2026\08\21\01a021b9-fb8d-7b31-a8a8-e3117686f59f\macau-bus-home-1280x900-v2.png`
+  - `C:\Users\AKR\.codex\visualizations\2026\08\21\01a021b9-fb8d-7b31-a8a8-e3117686f59f\macau-bus-home-390x844-v0.2.2.png`
+  - `C:\Users\AKR\.codex\visualizations\2026\08\21\01a021b9-fb8d-7b31-a8a8-e3117686f59f\macau-bus-route-390x844-v0.2.2.png`
+  - `C:\Users\AKR\.codex\visualizations\2026\08\21\01a021b9-fb8d-7b31-a8a8-e3117686f59f\macau-bus-home-1280x900-v0.2.2.png`
 - Combined comparison inputs opened with `view_image`:
-  - `C:\Users\AKR\.codex\visualizations\2026\08\21\01a021b9-fb8d-7b31-a8a8-e3117686f59f\compare-home-v2.png`
-  - `C:\Users\AKR\.codex\visualizations\2026\08\21\01a021b9-fb8d-7b31-a8a8-e3117686f59f\compare-route-v2.png`
+  - `C:\Users\AKR\.codex\visualizations\2026\08\21\01a021b9-fb8d-7b31-a8a8-e3117686f59f\compare-home-v0.2.2.png`
+  - `C:\Users\AKR\.codex\visualizations\2026\08\21\01a021b9-fb8d-7b31-a8a8-e3117686f59f\compare-route-v0.2.2.png`
 - Viewport: primary mobile CSS viewport 390×844; responsive check 1280×900.
 - Pixels and normalization: each source is 853×1844 pixels and was downsampled into a 390×844 comparison slot; each mobile implementation capture is native 390×844 at device scale factor 1. The 1280×900 implementation capture is native. Device status/home chrome in the source is treated as non-app-owned content.
 - States: clean light-mode home; route 26A direction 0 with live DSAT observations, OSM tiles and the live-bus tab selected.
@@ -37,13 +37,14 @@ No actionable P0, P1 or P2 differences remain.
 
 1. First full-view comparison found one P2: route detail did not visibly state route number `26A`; only the long endpoints appeared in the header.
 2. Commit `656f79c` added a jade `路線 26A` badge while preserving the endpoint title and 44px back/favorite controls.
-3. The v0.2.1 route was rebuilt and recaptured at 390×844. `compare-route-v2.png` shows the route identity above the endpoint title with no new overlap or clipping.
+3. The v0.2.2 route was rebuilt and recaptured at 390×844. `compare-route-v0.2.2.png` shows the route identity above the endpoint title with no new overlap or clipping.
+4. The final review replaced the text-glyph map marker with the Lucide `BusFront` icon and added visible map failure states. A second v0.2.2 capture confirmed the icon-family match and unchanged layout.
 
 ## Browser verification
 
 - Codex in-app Browser: home load, route search for 26A, route open, direction switch, OSM map/attribution, live buses, stop list, favorite toggle and reload persistence, map-tab route picker, and dark theme selection.
 - Live check: nine DSAT observations were rendered during the route check; plates were masked and the console had no errors or warnings.
-- Production/offline/update automation: 14 Playwright tests passed for 390×844 and desktop, including fresh first-controller offline reload, real changed-worker activation, exactly one guarded reload, localStorage preservation, manifest/icons and API/OSM cache exclusion.
+- Production/offline/update automation: 16 Playwright tests passed for 390×844 and desktop, including fresh first-controller offline reload, real changed-worker activation, exactly one guarded reload, localStorage preservation, manifest/icons, exact `/api`, and API/OSM cache exclusion.
 
 Focused region comparison was not needed after opening the native 390×844 route screenshot separately: the route badge, title wrapping, tabs, map legend, live row, icons and bottom navigation were all readable at native resolution.
 

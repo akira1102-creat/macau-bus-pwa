@@ -14,6 +14,7 @@
 
 ## 最終比較
 
+- Release：`macau-bus-pwa-v0.2.2`；unit/integration 140 項及 fresh E2E 16 項通過。
 - 對照來源：`docs/design/home-concept.png`、`docs/design/route-concept.png`。
 - 手機 render：390×844；桌面 render：1280×900。
 - Copy：繁體中文介面一致；空收藏／最近查看及未主動定位是乾淨本機狀態，不以假資料填充。
@@ -23,4 +24,4 @@
 - Icons：Lucide outline stroke 統一，active jade state 清晰，觸控目標至少 44px。
 - Responsive：390×844 及 1280×900 通過；top/bottom safe-area regression tests 通過。
 - Intentional deviations：真實 OSM map 取代概念的簡化地圖；乾淨首頁不虛構 nearby/favorite/recent；route header 同時顯示真實端點與 `路線 26A` badge。
-- Material mismatch fix：第一次比較發現 route number 缺失，commit `656f79c` 補回後重新 build、capture、combined compare，沒有剩餘 P0/P1/P2。
+- Material mismatch fix：第一次比較發現 route number 缺失，commit `656f79c` 補回；final review 再以 Lucide `BusFront` 取代文字 marker。v0.2.2 重新 build、capture、combined compare 後沒有剩餘 P0/P1/P2。

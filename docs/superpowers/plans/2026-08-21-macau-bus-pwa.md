@@ -36,11 +36,11 @@
 - Produces `TransitCatalog`, `RouteSummary`, `RouteDirection`, `BusStop`, `SegmentTime`, `loadCatalog(url): Promise<TransitCatalog>`.
 - Produces `npm run data:sync` and a polite `npm run dsat:test -- --route 1 --direction 0` POST probe using the current website token protocol.
 
-- [ ] Write failing unit tests proving route lookup, direction station order, station search, provenance validation, and rejection of malformed coordinates.
-- [ ] Run targeted Vitest tests and confirm failures are caused by missing catalog implementation.
-- [ ] Add minimal shared schemas, repository, sync pipeline and DSAT probe; sync only the five requested upstream files and record URL/ref/time/SHA-256.
-- [ ] Run the targeted tests until green, then run lint/typecheck for files in this task.
-- [ ] Initialize Git on branch `main`, commit only this task plus approved spec/design/plan with Cantonese message `建立澳門巴士 PWA 基礎與資料管線`.
+- [x] Write failing unit tests proving route lookup, direction station order, station search, provenance validation, and rejection of malformed coordinates.
+- [x] Run targeted Vitest tests and confirm failures are caused by missing catalog implementation.
+- [x] Add minimal shared schemas, repository, sync pipeline and DSAT probe; sync only the five requested upstream files and record URL/ref/time/SHA-256.
+- [x] Run the targeted tests until green, then run lint/typecheck for files in this task.
+- [x] Initialize Git on branch `main`, commit only this task plus approved spec/design/plan with Cantonese message `建立澳門巴士 PWA 基礎與資料管線`.
 
 ### Task 2: DSAT adapter, coalescing cache and realtime API
 
@@ -55,11 +55,11 @@
 - Produces `createDsatClient({ fetch, timeoutMs })`, `parseDsatRouteResponse(raw)`, `RealtimeCache.get(key, loader)`, and `buildServer(options)`.
 - Produces `GET /api/bus/realtime/:route/:direction`, `GET /api/health`, development-only `GET /api/debug/dsat/:route/:direction`.
 
-- [ ] Write failing parser tests from sanitized real DSAT fixtures, including missing optional strings, numeric speed strings and buses nested under station observations.
-- [ ] Write failing cache tests using a fake clock: 12-second fresh hit, concurrent miss coalescing, refresh after TTL, timeout/error stale fallback, and no-cache failure.
-- [ ] Write failing Fastify injection tests for allowlisted route, invalid direction, normalized response, `Cache-Control: no-store`, and production debug 404.
-- [ ] Implement the minimum POST adapter/cache/routes with the website token protocol, UTF-8 text-to-JSON parsing despite incorrect MIME, application `header === "000"` validation, AbortSignal 4-second timeout, response-size guard, Referer, rate limit and no automatic retries.
-- [ ] Run task tests, typecheck and lint; commit `加入 DSAT 即時代理與快取`.
+- [x] Write failing parser tests from sanitized real DSAT fixtures, including missing optional strings, numeric speed strings and buses nested under station observations.
+- [x] Write failing cache tests using a fake clock: 12-second fresh hit, concurrent miss coalescing, refresh after TTL, timeout/error stale fallback, and no-cache failure.
+- [x] Write failing Fastify injection tests for allowlisted route, invalid direction, normalized response, `Cache-Control: no-store`, and production debug 404.
+- [x] Implement the minimum POST adapter/cache/routes with the website token protocol, UTF-8 text-to-JSON parsing despite incorrect MIME, application `header === "000"` validation, AbortSignal 4-second timeout, response-size guard, Referer, rate limit and no automatic retries.
+- [x] Run task tests, typecheck and lint; commit `加入 DSAT 即時代理與快取`.
 
 ### Task 3: Domain helpers and local state
 
@@ -72,11 +72,11 @@
 - Consumes normalized catalog and `RealtimeRouteResponse`.
 - Produces `estimateEtaMinutes(...)`, `findNearbyStops(...)`, `getRealtimeRoute(...)`, `getCurrentPositionOnce()`, and versioned favorites/recent/theme storage helpers.
 
-- [ ] Write failing ETA tests for median-first, average fallback, cumulative segments, missing segment, target before observation and unknown station.
-- [ ] Write failing nearby tests for Haversine ordering and 300m/500m/1km thresholds without network calls.
-- [ ] Write failing local preference tests for schema validation, corrupt JSON recovery, recent cap 10 and profile-preserving PWA update behavior.
-- [ ] Implement minimum pure helpers and adapters; do not add UI or polling here.
-- [ ] Run task tests, typecheck and lint; commit `加入 ETA 附近站點與本機偏好邏輯`.
+- [x] Write failing ETA tests for median-first, average fallback, cumulative segments, missing segment, target before observation and unknown station.
+- [x] Write failing nearby tests for Haversine ordering and 300m/500m/1km thresholds without network calls.
+- [x] Write failing local preference tests for schema validation, corrupt JSON recovery, recent cap 10 and profile-preserving PWA update behavior.
+- [x] Implement minimum pure helpers and adapters; do not add UI or polling here.
+- [x] Run task tests, typecheck and lint; commit `加入 ETA 附近站點與本機偏好邏輯`.
 
 ### Task 4: Mobile UI, route workflow and Leaflet map
 
@@ -90,11 +90,11 @@
 - Consumes catalog repository, domain helpers, API client and local preferences.
 - Produces the five-tab app shell, home search/nearby/favorites/recent flow, route detail with directions/stops/realtime/stale/error, lazy Leaflet map and theme selection.
 
-- [ ] Write failing Testing Library tests for home search, location permission result, favorite/recent persistence, direction switch, loading, error, stale age, debug gating and the explicit estimated-position label.
-- [ ] Run tests and confirm failures are caused by missing UI behavior.
-- [ ] Extract CSS tokens, typography, component families, icon treatment and allowed visible copy from `docs/design/*.png`; implement Home and Route screens at 390×844 first, then responsive desktop shell.
-- [ ] Lazy-load map, include OSM attribution, station dots, selected route path, bus markers at station coordinates and optional local-only user location.
-- [ ] Run component tests, typecheck, lint and browser smoke; commit `完成手機介面與路線地圖流程`.
+- [x] Write failing Testing Library tests for home search, location permission result, favorite/recent persistence, direction switch, loading, error, stale age, debug gating and the explicit estimated-position label.
+- [x] Run tests and confirm failures are caused by missing UI behavior.
+- [x] Extract CSS tokens, typography, component families, icon treatment and allowed visible copy from `docs/design/*.png`; implement Home and Route screens at 390×844 first, then responsive desktop shell.
+- [x] Lazy-load map, include OSM attribution, station dots, selected route path, bus markers at station coordinates and optional local-only user location.
+- [x] Run component tests, typecheck, lint and browser smoke; commit `完成手機介面與路線地圖流程`.
 
 ### Task 5: PWA update lifecycle, integration and release QA
 
@@ -107,12 +107,12 @@
 - Consumes the complete app and server.
 - Produces installable manifest/service worker, safe update handoff, production build/server and repeatable QA commands.
 
-- [ ] Write failing unit/integration coverage for update registration guard and network policy helpers; configure Playwright tests for 390×844 and desktop.
-- [ ] Implement versioned cache, network-first navigation, cache-first hashed shell/catalog, NetworkOnly API/OSM, `skipWaiting`, `clientsClaim`, startup/pageshow/visible checks and one guarded `controllerchange` reload.
-- [ ] Add root scripts: `dev`, `build`, `start`, `test`, `test:e2e`, `typecheck`, `lint`, `verify`, `data:sync`, `dsat:test`.
-- [ ] Run `npm run verify`, then production start and Playwright core workflow; test an update-like rebuild and offline shell without clearing localStorage.
-- [ ] Capture implementation screenshots at 390×844 and desktop; inspect both concepts and both renders using `view_image`; record at least six comparison points, copy diff and intentional deviations in fidelity ledger, fixing every material mismatch.
-- [ ] Bump matching app/cache release identifier, inspect final diff, commit `完成 PWA 更新流程與整合驗證`.
+- [x] Write failing unit/integration coverage for update registration guard and network policy helpers; configure Playwright tests for 390×844 and desktop.
+- [x] Implement versioned cache, network-first navigation, cache-first hashed shell/catalog, NetworkOnly API/OSM, `skipWaiting`, `clientsClaim`, startup/pageshow/visible checks and one guarded `controllerchange` reload.
+- [x] Add root scripts: `dev`, `build`, `start`, `test`, `test:e2e`, `typecheck`, `lint`, `verify`, `data:sync`, `dsat:test`.
+- [x] Run `npm run verify`, then production start and Playwright core workflow; test an update-like rebuild and offline shell without clearing localStorage.
+- [x] Capture implementation screenshots at 390×844 and desktop; inspect both concepts and both renders using `view_image`; record at least six comparison points, copy diff and intentional deviations in fidelity ledger, fixing every material mismatch.
+- [x] Bump matching app/cache release identifier, inspect final diff, commit `完成 PWA 更新流程與整合驗證`.
 
 ## Plan self-review
 
