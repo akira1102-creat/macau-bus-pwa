@@ -166,9 +166,36 @@ describe('estimateEtaMinutes', () => {
     ]);
     const realtime = observation('M1', 0, ['M1', 'M2']);
 
-    expect(estimateEtaMinutes(catalog, realtime, 'M3')).toBeNull();
     expect(estimateEtaMinutes(catalog, realtime, 'M3', 'M1')).toBe(2);
     expect(estimateEtaMinutes(catalog, realtime, 'M3', 'M2')).toBe(1);
+  });
+
+  it('returns unavailable when the explicit observation station was not observed', () => {
+    const catalog = catalogWithSegments([
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M1',
+        toStopId: 'M2',
+        medianSeconds: 55,
+      },
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M2',
+        toStopId: 'M3',
+        medianSeconds: 65,
+      },
+    ]);
+    const realtime = observation('M2', 0, ['M2']);
+
+    expect(estimateEtaMinutes(catalog, realtime, 'M3', 'M1')).toBeNull();
+    expect(estimateEtaMinutes(catalog, realtime, 'M3', 'M2')).toBe(1);
+  });
+
+  it('requires an explicit observation station at compile time', () => {
+    // @ts-expect-error observationStationCode is intentionally required
+    estimateEtaMinutes(catalogWithSegments([]), observation('M1'), 'M3');
   });
 
   it('follows the explicitly selected reverse direction', () => {

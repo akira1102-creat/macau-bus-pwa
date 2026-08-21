@@ -65,6 +65,39 @@ function resolveKey(options: PreferencesOptions): string {
   return options.storageKey ?? options.key ?? PREFERENCES_STORAGE_KEY;
 }
 
+const storageFallbacks = new WeakMap<PreferencesStorage, Map<string, Preferences>>();
+const noStorageFallbacks = new Map<string, Preferences>();
+
+function clonePreferences(value: Preferences): Preferences {
+  return {
+    version: value.version,
+    favorites: [...value.favorites],
+    recent: [...value.recent],
+    theme: value.theme,
+  };
+}
+
+function getStorageFallback(storage: PreferencesStorage, key: string): Preferences | undefined {
+  return storageFallbacks.get(storage)?.get(key);
+}
+
+function rememberStorageFallback(storage: PreferencesStorage, key: string, value: Preferences): void {
+  let values = storageFallbacks.get(storage);
+  if (!values) {
+    values = new Map<string, Preferences>();
+    storageFallbacks.set(storage, values);
+  }
+  values.set(key, clonePreferences(value));
+}
+
+function forgetStorageFallback(storage: PreferencesStorage, key: string): void {
+  const values = storageFallbacks.get(storage);
+  values?.delete(key);
+  if (values?.size === 0) {
+    storageFallbacks.delete(storage);
+  }
+}
+
 function uniqueStrings(values: readonly string[], max = Number.POSITIVE_INFINITY): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -93,12 +126,17 @@ function normalizePreferences(value: Preferences): Preferences {
 
 export function loadPreferences(options: PreferencesOptions = {}): Preferences {
   const storage = resolveStorage(options);
+  const key = resolveKey(options);
   if (!storage) {
-    return copyDefault();
+    return clonePreferences(noStorageFallbacks.get(key) ?? copyDefault());
+  }
+  const fallback = getStorageFallback(storage, key);
+  if (fallback) {
+    return clonePreferences(fallback);
   }
   let raw: string | null;
   try {
-    raw = storage.getItem(resolveKey(options));
+    raw = storage.getItem(key);
   } catch {
     return copyDefault();
   }
@@ -110,13 +148,13 @@ export function loadPreferences(options: PreferencesOptions = {}): Preferences {
     const parsed: unknown = JSON.parse(raw);
     const validated = PreferencesSchema.safeParse(parsed);
     if (!validated.success) {
-      storage.removeItem(resolveKey(options));
+      storage.removeItem(key);
       return copyDefault();
     }
     return normalizePreferences(validated.data);
   } catch {
     try {
-      storage.removeItem(resolveKey(options));
+      storage.removeItem(key);
     } catch {
       // A read-only or unavailable storage should still recover in memory.
     }
@@ -127,13 +165,18 @@ export function loadPreferences(options: PreferencesOptions = {}): Preferences {
 export function savePreferences(preferences: Preferences, options: PreferencesOptions = {}): Preferences {
   const normalized = normalizePreferences(PreferencesSchema.parse(preferences));
   const storage = resolveStorage(options);
-  if (storage) {
-    try {
-      storage.setItem(resolveKey(options), JSON.stringify(normalized));
-    } catch {
-      // Private-mode/quota failures leave the normalized value available to the
-      // in-memory store; callers must not lose an interaction to persistence.
-    }
+  const key = resolveKey(options);
+  if (!storage) {
+    noStorageFallbacks.set(key, clonePreferences(normalized));
+    return normalized;
+  }
+  try {
+    storage.setItem(key, JSON.stringify(normalized));
+    forgetStorageFallback(storage, key);
+  } catch {
+    rememberStorageFallback(storage, key, normalized);
+    // Private-mode/quota failures leave the normalized value available to the
+    // in-memory store; callers must not lose an interaction to persistence.
   }
   return normalized;
 }

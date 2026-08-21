@@ -60,6 +60,13 @@ const boundaryCatalog = {
   ],
 } as TransitCatalog;
 
+const halfMillimetreBeyondCatalog = {
+  stops: [
+    stopAtMeters('R300', 300),
+    stopAtMeters('R300_HALF_MM_BEYOND', 300.0005),
+  ],
+} as TransitCatalog;
+
 describe('findNearbyStops', () => {
   it('orders stops by local Haversine distance', () => {
     const nearby = findNearbyStops(catalog, { latitude: 0, longitude: 0 }, 1_200);
@@ -92,5 +99,9 @@ describe('findNearbyStops', () => {
     [1_000, ['R300', 'R500', 'R1000']],
   ])('includes mathematically constructed exact %sm boundary points only', (radiusMeters, expectedIds) => {
     expect(findNearbyStops(boundaryCatalog, origin, radiusMeters).map((entry) => entry.stop.id)).toEqual(expectedIds);
+  });
+
+  it('excludes a point half a millimetre beyond the selected radius', () => {
+    expect(findNearbyStops(halfMillimetreBeyondCatalog, origin, 300).map((entry) => entry.stop.id)).toEqual(['R300']);
   });
 });

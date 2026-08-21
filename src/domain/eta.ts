@@ -8,7 +8,7 @@ export interface EtaEstimateOptions {
   catalog: TransitCatalog;
   realtime: RealtimeRouteResponse;
   targetStopId: string;
-  observationStationCode?: string;
+  observationStationCode: string;
 }
 
 export type EtaMinutes = number | null;
@@ -45,6 +45,11 @@ function estimate(
 
   const observation = observationStationCode?.trim();
   if (!observation) {
+    return null;
+  }
+
+  const isObserved = realtime.buses.some((bus) => bus.stationCode.trim() === observation);
+  if (!isObserved || !direction.stopIds.includes(observation)) {
     return null;
   }
 
@@ -88,7 +93,7 @@ export function estimateEtaMinutes(
   catalog: TransitCatalog,
   realtime: RealtimeRouteResponse,
   targetStopId: string,
-  observationStationCode?: string,
+  observationStationCode: string,
 ): EtaMinutes;
 export function estimateEtaMinutes(
   first: TransitCatalog | EtaEstimateOptions,
@@ -99,7 +104,7 @@ export function estimateEtaMinutes(
   if ('catalog' in first && 'realtime' in first) {
     return estimate(first.catalog, first.realtime, first.targetStopId, first.observationStationCode);
   }
-  if (!second || third === undefined) {
+  if (!second || third === undefined || fourth === undefined) {
     return null;
   }
   return estimate(first, second, third, fourth);

@@ -10,9 +10,9 @@ export interface NearbyStop {
 }
 
 const EARTH_RADIUS_METERS = 6_371_000;
-// One millimetre absorbs IEEE-754 inverse/projection rounding without widening
+// One micrometre absorbs IEEE-754 inverse/projection rounding without widening
 // a user-selected 300m/500m/1km radius by a meaningful amount.
-const DISTANCE_EPSILON_METERS = 0.001;
+const DISTANCE_EPSILON_METERS = 0.000001;
 
 function coordinatesFromPosition(position: NearbyPosition): readonly [number, number] | null {
   if (Array.isArray(position)) {

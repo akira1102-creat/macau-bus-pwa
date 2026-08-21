@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  addRecent,
   createLocalPreferences,
   DEFAULT_PREFERENCES,
+  getFavorites,
+  getRecent,
+  getTheme,
   loadPreferences,
+  setFavorites,
+  setTheme,
   type PreferencesStorage,
 } from './local-preferences';
 
@@ -89,5 +95,18 @@ describe('versioned local preferences', () => {
     expect(preferences.getFavorites()).toEqual(['1']);
     expect(preferences.getRecent()).toEqual(['1']);
     expect(preferences.getTheme()).toBe('dark');
+  });
+
+  it('keeps top-level helper state in memory after a storage write failure', () => {
+    const storage = new QuotaStorage();
+
+    expect(() => setFavorites(['1'], { storage })).not.toThrow();
+    expect(getFavorites({ storage })).toEqual(['1']);
+
+    expect(() => addRecent('26A', { storage })).not.toThrow();
+    expect(getRecent({ storage })).toEqual(['26A']);
+
+    expect(() => setTheme('dark', { storage })).not.toThrow();
+    expect(getTheme({ storage })).toBe('dark');
   });
 });
