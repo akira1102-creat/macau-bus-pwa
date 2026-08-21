@@ -127,6 +127,16 @@ function parseNumber(record: Record<string, unknown>, keys: string[]): number | 
   return undefined;
 }
 
+function parseFiniteNumber(record: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function normalizeSegmentTimes(value: unknown): SegmentTime[] {
   const source = asRecord(value, 'segment_times');
   const result: SegmentTime[] = [];
@@ -148,7 +158,10 @@ function normalizeSegmentTimes(value: unknown): SegmentTime[] {
         }
         const stats = asRecord(statsValue, `segment_times.${routeDirection}.${timeBucket}.${segmentKey}`);
         const averageSeconds = parseNumber(stats, ['avg_sec', 'averageSeconds', 'average']);
-        const medianSeconds = parseNumber(stats, ['p50', 'medianSeconds', 'median']);
+        // Keep a finite negative median in the catalog. It is an explicit
+        // upstream invalid-data signal; ETA will return unavailable rather
+        // than masking it with avg_sec.
+        const medianSeconds = parseFiniteNumber(stats, ['p50', 'medianSeconds', 'median']);
         const p90Seconds = parseNumber(stats, ['p90', 'p90Seconds']);
         const samples = parseNumber(stats, ['samples']);
         result.push({

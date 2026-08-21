@@ -218,4 +218,136 @@ describe('estimateEtaMinutes', () => {
 
     expect(estimateEtaMinutes(catalog, observation('M3', 1), 'M1', 'M3')).toBe(3);
   });
+
+  it('selects the segment bucket matching the current Macau local hour', () => {
+    const catalog = catalogWithSegments([
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M1',
+        toStopId: 'M2',
+        medianSeconds: 60,
+        timeBucket: '6',
+      },
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M1',
+        toStopId: 'M2',
+        medianSeconds: 180,
+        timeBucket: '12',
+      },
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M2',
+        toStopId: 'M3',
+        medianSeconds: 60,
+        timeBucket: '6',
+      },
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M2',
+        toStopId: 'M3',
+        medianSeconds: 180,
+        timeBucket: '12',
+      },
+    ]);
+
+    expect(estimateEtaMinutes({
+      catalog,
+      realtime: observation('M1'),
+      targetStopId: 'M3',
+      observationStationCode: 'M1',
+      at: new Date('2026-08-21T04:30:00.000Z'),
+    })).toBe(6);
+  });
+
+  it('switches buckets exactly at the Macau local hour boundary', () => {
+    const catalog = catalogWithSegments([
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M1',
+        toStopId: 'M2',
+        medianSeconds: 60,
+        timeBucket: '11',
+      },
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M1',
+        toStopId: 'M2',
+        medianSeconds: 120,
+        timeBucket: '12',
+      },
+    ]);
+
+    expect(estimateEtaMinutes({
+      catalog,
+      realtime: observation('M1'),
+      targetStopId: 'M2',
+      observationStationCode: 'M1',
+      at: new Date('2026-08-21T03:59:59.999Z'),
+    })).toBe(1);
+    expect(estimateEtaMinutes({
+      catalog,
+      realtime: observation('M1'),
+      targetStopId: 'M2',
+      observationStationCode: 'M1',
+      at: new Date('2026-08-21T04:00:00.000Z'),
+    })).toBe(2);
+  });
+
+  it('uses a documented average across all buckets when the current bucket is absent', () => {
+    const catalog = catalogWithSegments([
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M1',
+        toStopId: 'M2',
+        medianSeconds: 180,
+        timeBucket: '18',
+      },
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M1',
+        toStopId: 'M2',
+        medianSeconds: 60,
+        timeBucket: '6',
+      },
+    ]);
+
+    expect(estimateEtaMinutes({
+      catalog,
+      realtime: observation('M1'),
+      targetStopId: 'M2',
+      observationStationCode: 'M1',
+      at: new Date('2026-08-21T04:30:00.000Z'),
+    })).toBe(2);
+  });
+
+  it('returns unavailable instead of falling back when a selected median is negative', () => {
+    const catalog = catalogWithSegments([
+      {
+        route: '1',
+        direction: 0,
+        fromStopId: 'M1',
+        toStopId: 'M2',
+        medianSeconds: -1,
+        averageSeconds: 60,
+        timeBucket: '12',
+      },
+    ]);
+
+    expect(estimateEtaMinutes({
+      catalog,
+      realtime: observation('M1'),
+      targetStopId: 'M2',
+      observationStationCode: 'M1',
+      at: new Date('2026-08-21T04:30:00.000Z'),
+    })).toBeNull();
+  });
 });

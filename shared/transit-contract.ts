@@ -67,7 +67,9 @@ export const SegmentTimeSchema = z.object({
   fromStopId: z.string().trim().min(1),
   toStopId: z.string().trim().min(1),
   averageSeconds: z.number().finite().nonnegative().optional(),
-  medianSeconds: z.number().finite().nonnegative().optional(),
+  // A negative median is retained as an invalid-data signal. ETA must report
+  // the segment as unavailable instead of silently falling back to average.
+  medianSeconds: z.number().finite().optional(),
   p90Seconds: z.number().finite().nonnegative().optional(),
   samples: z.number().int().nonnegative().optional(),
   timeBucket: z.string().trim().min(1).optional(),

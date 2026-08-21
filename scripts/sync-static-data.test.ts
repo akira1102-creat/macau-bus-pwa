@@ -12,6 +12,7 @@ import {
   syncStaticData,
 } from './sync-static-data';
 import type { UpstreamStaticData } from './sync-static-data';
+import { SegmentTimeSchema } from '../shared/transit-contract';
 
 const fixtureRoot = new URL('../tests/fixtures/catalog/', import.meta.url);
 
@@ -62,6 +63,26 @@ describe('static catalog synchronizer', () => {
 
     expect(catalog.stops[0]?.routeIds).toEqual(['1']);
     expect(catalog.stops.every((stop) => stop.routeIds.every((routeId) => routeIds.has(routeId)))).toBe(true);
+  });
+
+  it('preserves a negative upstream median so ETA can report it as unavailable', () => {
+    const invalidMedian = structuredClone(upstream) as UpstreamStaticData;
+    const segmentTimes = invalidMedian.segmentTimes as Record<string, Record<string, Record<string, { p50: number; avg_sec: number }>>>;
+    segmentTimes['1_0']!['6']!['M1→M2']!.p50 = -1;
+
+    const catalog = buildCatalogFromUpstream(invalidMedian, {
+      generatedAt: '2026-08-21T00:00:00.000Z',
+      provenance: {
+        sourceRepository: 'https://github.com/example/macau-bus-data',
+        sourceRef: 'fixture-ref-20260821',
+        syncedAt: '2026-08-21T00:00:00.000Z',
+        files: [],
+      },
+    });
+
+    const segment = catalog.segmentTimes.find((candidate) => candidate.fromStopId === 'M1' && candidate.toStopId === 'M2');
+    expect(segment?.medianSeconds).toBe(-1);
+    expect(() => SegmentTimeSchema.parse(segment)).not.toThrow();
   });
 
   it('allowlists exactly the five upstream files and records URL/ref/time/SHA-256', () => {
