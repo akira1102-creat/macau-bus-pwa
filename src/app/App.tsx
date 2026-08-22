@@ -20,8 +20,13 @@ export interface AppProps {
   preferences?: LocalPreferences;
 }
 
+export function resolveCatalogUrl(baseUrl: string = import.meta.env.BASE_URL): string {
+  const normalizedBase = baseUrl.trim() || '/';
+  return `${normalizedBase.endsWith('/') ? normalizedBase : `${normalizedBase}/`}data/catalog.json`;
+}
+
 function defaultCatalogLoader(): Promise<TransitCatalog> {
-  return loadCatalog('/data/catalog.json');
+  return loadCatalog(resolveCatalogUrl());
 }
 
 function resolvedTheme(theme: Theme): 'light' | 'dark' {

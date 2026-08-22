@@ -34,8 +34,13 @@ function routeUrl(route: string, direction: DirectionId, baseUrl: string): strin
   if (!normalizedRoute || (direction !== 0 && direction !== 1)) {
     throw new RealtimeApiError('invalid-request');
   }
-  const prefix = baseUrl.replace(/\/+$/, '');
-  return `${prefix}/api/bus/realtime/${encodeURIComponent(normalizedRoute)}/${direction}`;
+  const prefix = baseUrl.trim().replace(/\/+$/, '');
+  const apiPrefix = !prefix
+    ? '/api'
+    : /(?:^|\/)api$/.test(prefix)
+      ? prefix
+      : `${prefix}/api`;
+  return `${apiPrefix}/bus/realtime/${encodeURIComponent(normalizedRoute)}/${direction}`;
 }
 
 /** Browser-side normalized realtime adapter. Upstream/raw payloads never leave the server. */
@@ -44,7 +49,7 @@ export async function getRealtimeRoute(
   direction: DirectionId,
   options: RealtimeApiClientOptions = {},
 ): Promise<RealtimeRouteResponse> {
-  const url = routeUrl(route, direction, options.baseUrl ?? '');
+  const url = routeUrl(route, direction, options.baseUrl ?? import.meta.env.VITE_API_BASE_URL ?? '');
   const fetcher = options.fetch ?? globalThis.fetch;
 
   let response: Response;
