@@ -2,7 +2,7 @@ import type { Config, Context } from '@netlify/functions';
 
 import { ParkingClientError } from '../../server/parking/client';
 import { guardParkingApiRequest, parkingJsonResponse } from '../../server/parking/http';
-import { getParkingRuntime } from '../../server/parking/runtime';
+import { ParkingAdmissionError, getParkingRuntime } from '../../server/parking/runtime';
 import { ParkingSnapshotSchema } from '../../shared/parking-contract';
 
 export default async function parkingHandler(request: Request, context: Context): Promise<Response> {
@@ -11,9 +11,17 @@ export default async function parkingHandler(request: Request, context: Context)
   if (guarded) return guarded;
 
   try {
-    const snapshot = ParkingSnapshotSchema.parse(await getParkingRuntime().client.fetchSnapshot());
+    const snapshot = ParkingSnapshotSchema.parse(await getParkingRuntime().fetchSnapshot());
     return parkingJsonResponse(request, snapshot);
   } catch (error) {
+    if (error instanceof ParkingAdmissionError) {
+      return parkingJsonResponse(
+        request,
+        { error: error.code },
+        429,
+        { 'Retry-After': String(error.retryAfterSeconds) },
+      );
+    }
     const diagnosticCode = error instanceof ParkingClientError ? error.code : 'unknown';
     console.error(JSON.stringify({ event: 'dsat-parking-failed', code: diagnosticCode }));
     const timeout = error instanceof ParkingClientError && error.code === 'timeout';

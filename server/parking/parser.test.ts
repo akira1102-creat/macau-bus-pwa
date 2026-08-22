@@ -57,6 +57,23 @@ describe('DSAT parking realtime parser', () => {
     });
   });
 
+  it('forces every parsed space count to null when a paused row still contains numeric values', () => {
+    const pausedWithNumbers = `<tr data-suspended="true"><td><span class="style7">暫停但有舊數字</span><img src="carpark_car.png">7<img src="carpark_motor.png">8<img src="carpark_ecar.png">9<img src="carpark_emotor.png">10<img src="carpark_disabled.png">11</td><td><a href="carpark_detail.aspx?id=54320">open</a></td></tr>`;
+
+    const [facility] = parseParkingRealtimeHtml(pausedWithNumbers);
+
+    expect(facility).toMatchObject({
+      suspended: true,
+      spaces: {
+        car: null,
+        motorcycle: null,
+        electricCar: null,
+        electricMotorcycle: null,
+        accessible: null,
+      },
+    });
+  });
+
   it('skips malformed rows and never invents a non-numeric official ID', () => {
     expect(parseParkingRealtimeHtml(realtimeFixture)).toHaveLength(2);
   });
@@ -65,6 +82,17 @@ describe('DSAT parking realtime parser', () => {
     const malformed = `<tr><td><span class="style7">小數資料</span><img src="carpark_car.png">12.5</td><td><a href="carpark_detail.aspx?id=54321">open</a></td></tr>`;
 
     expect(parseParkingRealtimeHtml(malformed)[0]?.spaces.car).toBeNull();
+  });
+
+  it('rejects non-DSAT HTML and a DSAT shell with zero valid facility rows', () => {
+    expect(() => parseParkingRealtimeHtml('<html><body>login required</body></html>')).toThrow(/invalid/i);
+    expect(() => parseParkingRealtimeHtml('<div id="carpark_data"><table><tr><td>broken row</td></tr></table></div>')).toThrow(/invalid/i);
+  });
+
+  it('rejects a partial numeric query ID instead of truncating it', () => {
+    const partialId = `<div id="carpark_data"><tr><td><span class="style7">部分 ID</span><img src="carpark_car.png">2</td><td><a href="carpark_detail.aspx?id=123abc">open</a></td></tr></div>`;
+
+    expect(() => parseParkingRealtimeHtml(partialId)).toThrow(/invalid/i);
   });
 });
 

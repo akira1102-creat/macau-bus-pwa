@@ -7,9 +7,71 @@ import {
   PARKING_TIMEOUT_MS,
   type ParkingClient,
 } from './client';
+import type { ParkingSnapshot } from '../../shared/parking-contract';
+
+export const PARKING_REFRESH_COOLDOWN_MS = 5_000;
+
+export class ParkingAdmissionError extends Error {
+  readonly code = 'rate-limit-exceeded' as const;
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterMs: number) {
+    super('Parking refresh admission limit exceeded');
+    this.name = 'ParkingAdmissionError';
+    this.retryAfterSeconds = Math.max(1, Math.ceil(retryAfterMs / 1_000));
+  }
+}
+
+export interface ParkingRefreshAdmissionOptions {
+  now?: () => number;
+  cooldownMs?: number;
+}
+
+export class ParkingRefreshAdmission {
+  private readonly now: () => number;
+  private readonly cooldownMs: number;
+  private nextAllowedAt = 0;
+  private pending: Promise<ParkingSnapshot> | undefined;
+  private lastSnapshot: ParkingSnapshot | undefined;
+
+  constructor(options: ParkingRefreshAdmissionOptions = {}) {
+    this.now = options.now ?? (() => Date.now());
+    this.cooldownMs = Number.isSafeInteger(options.cooldownMs)
+      && (options.cooldownMs ?? 0) > 0
+      ? options.cooldownMs!
+      : PARKING_REFRESH_COOLDOWN_MS;
+  }
+
+  fetch(loader: () => Promise<ParkingSnapshot>): Promise<ParkingSnapshot> {
+    if (this.pending) return this.pending;
+    const currentTime = this.now();
+    if (currentTime < this.nextAllowedAt) {
+      if (this.lastSnapshot) {
+        return Promise.resolve({ ...this.lastSnapshot, stale: true });
+      }
+      return Promise.reject(new ParkingAdmissionError(this.nextAllowedAt - currentTime));
+    }
+
+    this.nextAllowedAt = currentTime + this.cooldownMs;
+    const pending = Promise.resolve()
+      .then(loader)
+      .then((snapshot) => {
+        if (!snapshot.stale) this.lastSnapshot = snapshot;
+        else if (!this.lastSnapshot) this.lastSnapshot = snapshot;
+        return snapshot;
+      })
+      .finally(() => {
+        if (this.pending === pending) this.pending = undefined;
+      });
+    this.pending = pending;
+    return pending;
+  }
+}
 
 export interface ParkingRuntime {
   client: ParkingClient;
+  admission: ParkingRefreshAdmission;
+  fetchSnapshot(): Promise<ParkingSnapshot>;
 }
 
 let runtimeState: ParkingRuntime | undefined;
@@ -42,14 +104,20 @@ export function getParkingRuntime(): ParkingRuntime {
   if (!runtimeState) {
     const endpoint = readEnvironment('DSAT_PARKING_ENDPOINT') ?? DSAT_PARKING_ENDPOINT;
     const detailEndpoint = readEnvironment('DSAT_PARKING_DETAIL_ENDPOINT') ?? DSAT_PARKING_DETAIL_ENDPOINT;
+    const client = createParkingClient({
+      endpoint,
+      detailEndpoint,
+      timeoutMs: positiveInteger('DSAT_PARKING_TIMEOUT_MS', PARKING_TIMEOUT_MS),
+      maxResponseBytes: positiveInteger('DSAT_PARKING_MAX_RESPONSE_BYTES', PARKING_MAX_RESPONSE_BYTES),
+      cacheTtlMs: positiveInteger('DSAT_PARKING_CACHE_TTL_MS', PARKING_CACHE_TTL_MS),
+    });
+    const admission = new ParkingRefreshAdmission({
+      cooldownMs: positiveInteger('DSAT_PARKING_REFRESH_COOLDOWN_MS', PARKING_REFRESH_COOLDOWN_MS),
+    });
     runtimeState = {
-      client: createParkingClient({
-        endpoint,
-        detailEndpoint,
-        timeoutMs: positiveInteger('DSAT_PARKING_TIMEOUT_MS', PARKING_TIMEOUT_MS),
-        maxResponseBytes: positiveInteger('DSAT_PARKING_MAX_RESPONSE_BYTES', PARKING_MAX_RESPONSE_BYTES),
-        cacheTtlMs: positiveInteger('DSAT_PARKING_CACHE_TTL_MS', PARKING_CACHE_TTL_MS),
-      }),
+      client,
+      admission,
+      fetchSnapshot: () => admission.fetch(() => client.fetchSnapshot()),
     };
   }
   return runtimeState;

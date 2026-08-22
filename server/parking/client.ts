@@ -6,7 +6,7 @@ import {
   type ParkingFacility,
   type ParkingSnapshot,
 } from '../../shared/parking-contract';
-import { parseParkingDetailHtml, parseParkingRealtimeHtml } from './parser';
+import { ParkingParseError, parseParkingDetailHtml, parseParkingRealtimeHtml } from './parser';
 
 export const DSAT_PARKING_ENDPOINT = 'https://m.dsat.gov.mo/carpark.aspx';
 export const DSAT_PARKING_DETAIL_ENDPOINT = 'https://m.dsat.gov.mo/carpark_detail.aspx';
@@ -14,6 +14,7 @@ export const PARKING_TIMEOUT_MS = 4_000;
 export const PARKING_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 export const PARKING_CACHE_TTL_MS = 5_000;
 export const PARKING_DETAIL_CONCURRENCY = 4;
+export const PARKING_DETAIL_BUDGET_MS = 1_500;
 
 export type ParkingClientErrorCode =
   | 'timeout'
@@ -50,6 +51,7 @@ export interface ParkingClientOptions {
   maxResponseBytes?: number;
   cacheTtlMs?: number;
   detailConcurrency?: number;
+  detailBudgetMs?: number;
   cache?: RealtimeCache<ParkingSourceSnapshot>;
 }
 
@@ -62,6 +64,38 @@ interface FetchTextOptions {
 
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException('Parking request aborted', 'AbortError');
+}
+
+function raceWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    return Promise.reject(new ParkingClientError('aborted', { cause: abortReason(signal) }));
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new ParkingClientError('aborted', { cause: abortReason(signal) }));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 function mapFetchError(error: unknown, controller: AbortController, timedOut: boolean, parentSignal?: AbortSignal): ParkingClientError {
@@ -79,6 +113,28 @@ function mapFetchError(error: unknown, controller: AbortController, timedOut: bo
     return new ParkingClientError('timeout', { cause: error });
   }
   return new ParkingClientError('network', { cause: error });
+}
+
+function awaitWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(abortReason(signal));
+    };
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 async function fetchHtml(url: string, options: FetchTextOptions): Promise<string> {
@@ -102,14 +158,15 @@ async function fetchHtml(url: string, options: FetchTextOptions): Promise<string
   try {
     let response: Response;
     try {
-      response = await options.fetcher(url, {
+      const responsePromise = Promise.resolve().then(() => options.fetcher(url, {
         method: 'GET',
         headers: {
           accept: 'text/html, application/xhtml+xml;q=0.9, */*;q=0.1',
           'user-agent': 'macau-bus-pwa-parking-adapter/1.0',
         },
         signal: controller.signal,
-      });
+      }));
+      response = await awaitWithAbort(responsePromise, controller.signal);
     } catch (error) {
       throw mapFetchError(error, controller, timedOut, options.signal);
     }
@@ -141,6 +198,13 @@ function normalizeMaxResponseBytes(value: number | undefined): number {
   return Math.min(value, 8 * 1024 * 1024);
 }
 
+function normalizeDetailBudgetMs(value: number | undefined): number {
+  if (value === undefined || !Number.isSafeInteger(value) || value < 1) {
+    return PARKING_DETAIL_BUDGET_MS;
+  }
+  return Math.min(value, 30_000);
+}
+
 async function enrichFacilities(
   facilities: ParkingFacility[],
   options: {
@@ -149,13 +213,19 @@ async function enrichFacilities(
     timeoutMs: number;
     maxResponseBytes: number;
     concurrency: number;
-    signal?: AbortSignal;
+    budgetMs: number;
   },
 ): Promise<ParkingFacility[]> {
   const result = [...facilities];
+  const budgetController = new AbortController();
+  const budgetTimer = setTimeout(() => {
+    budgetController.abort(new ParkingClientError('timeout'));
+  }, options.budgetMs);
+  const detailSignal = budgetController.signal;
   let nextIndex = 0;
   const worker = async (): Promise<void> => {
     while (true) {
+      if (detailSignal.aborted) return;
       const index = nextIndex;
       nextIndex += 1;
       if (index >= result.length) return;
@@ -165,24 +235,26 @@ async function enrichFacilities(
       try {
         const detailHtml = await fetchHtml(detailUrl, {
           fetcher: options.fetcher,
-          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          signal: detailSignal,
           timeoutMs: options.timeoutMs,
           maxResponseBytes: options.maxResponseBytes,
         });
         const detail = parseParkingDetailHtml(detailHtml);
         const parsed = ParkingFacilitySchema.safeParse({ ...facility, ...detail });
         if (parsed.success) result[index] = parsed.data;
-      } catch (error) {
-        if (error instanceof ParkingClientError && error.code === 'aborted') {
-          throw error;
-        }
+      } catch {
+        if (detailSignal.aborted) return;
         // Static detail is enrichment only. A transient detail failure must not
         // remove the live row or turn a complete realtime response into an error.
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(options.concurrency, result.length) }, () => worker()));
-  return result;
+  try {
+    await Promise.all(Array.from({ length: Math.min(options.concurrency, result.length) }, () => worker()));
+    return result;
+  } finally {
+    clearTimeout(budgetTimer);
+  }
 }
 
 function createSourceSnapshotLoader(options: {
@@ -192,24 +264,31 @@ function createSourceSnapshotLoader(options: {
   timeoutMs: number;
   maxResponseBytes: number;
   detailConcurrency: number;
+  detailBudgetMs: number;
   now: () => Date;
-  signal?: AbortSignal;
 }): () => Promise<ParkingSourceSnapshot> {
   return async () => {
     const html = await fetchHtml(options.endpoint, {
       fetcher: options.fetcher,
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
       timeoutMs: options.timeoutMs,
       maxResponseBytes: options.maxResponseBytes,
     });
-    const parsed = parseParkingRealtimeHtml(html);
+    let parsed: ParkingFacility[];
+    try {
+      parsed = parseParkingRealtimeHtml(html);
+    } catch (error) {
+      if (error instanceof ParkingParseError) {
+        throw new ParkingClientError('invalid-html', { cause: error });
+      }
+      throw error;
+    }
     const facilities = await enrichFacilities(parsed, {
       fetcher: options.fetcher,
       detailEndpoint: options.detailEndpoint,
       timeoutMs: options.timeoutMs,
       maxResponseBytes: options.maxResponseBytes,
       concurrency: options.detailConcurrency,
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      budgetMs: options.detailBudgetMs,
     });
     return {
       updatedAt: options.now().toISOString(),
@@ -224,6 +303,7 @@ export function createParkingClient(options: ParkingClientOptions = {}): Parking
   const timeoutMs = options.timeoutMs ?? PARKING_TIMEOUT_MS;
   const maxResponseBytes = normalizeMaxResponseBytes(options.maxResponseBytes);
   const detailConcurrency = normalizeConcurrency(options.detailConcurrency);
+  const detailBudgetMs = normalizeDetailBudgetMs(options.detailBudgetMs);
   const cache = options.cache ?? new RealtimeCache<ParkingSourceSnapshot>({
     now: () => now().getTime(),
     freshTtlMs: options.cacheTtlMs ?? PARKING_CACHE_TTL_MS,
@@ -233,19 +313,17 @@ export function createParkingClient(options: ParkingClientOptions = {}): Parking
 
   return {
     async fetchSnapshot(signal?: AbortSignal): Promise<ParkingSnapshot> {
-      const result = await cache.get('parking', createSourceSnapshotLoader({
+      const sharedResult = cache.get('parking', createSourceSnapshotLoader({
         fetcher,
         endpoint,
         detailEndpoint,
         timeoutMs,
         maxResponseBytes,
         detailConcurrency,
+        detailBudgetMs,
         now,
-        ...(signal === undefined ? {} : { signal }),
       }));
-      if (signal?.aborted) {
-        throw new ParkingClientError('aborted', { cause: abortReason(signal) });
-      }
+      const result = await raceWithAbort(sharedResult, signal);
       return ParkingSnapshotSchema.parse({ ...result.value, stale: result.stale });
     },
   };

@@ -13,6 +13,15 @@ export interface ParkingDetail {
   longitude: number | null;
 }
 
+export class ParkingParseError extends Error {
+  readonly code = 'invalid-html' as const;
+
+  constructor(message = 'Invalid DSAT parking HTML contains no valid facilities') {
+    super(message);
+    this.name = 'ParkingParseError';
+  }
+}
+
 function decodeHtmlEntities(value: string): string {
   return value
     .replace(/&nbsp;/gi, ' ')
@@ -122,8 +131,9 @@ function extractFacilityName(row: string): string | null {
 
 function extractOfficialId(row: string): string | null {
   const decoded = decodeHtmlEntities(row);
-  const fromDetail = decoded.match(/carpark_detail\.aspx\b[^"']*?\bid\s*=\s*(\d+)/i)?.[1];
-  if (fromDetail) return fromDetail;
+  const detailHref = decoded.match(/carpark_detail\.aspx\b[^"']*/i)?.[0] ?? '';
+  const fromDetail = detailHref.match(/[?&]id\s*=\s*([^&#\s"']+)/i)?.[1];
+  if (fromDetail && /^\d+$/.test(fromDetail)) return fromDetail;
   const dataId = decoded.match(/\bdata-(?:parking-)?id\s*=\s*["'](\d+)["']/i)?.[1];
   return dataId ?? null;
 }
@@ -179,7 +189,14 @@ function emptySpaces(): Record<SpaceKey, number | null> {
 }
 
 export function parseParkingRealtimeHtml(html: string): ParkingFacility[] {
-  if (typeof html !== 'string' || !html.trim()) return [];
+  if (typeof html !== 'string' || !html.trim()) {
+    throw new ParkingParseError('Invalid DSAT parking HTML is empty');
+  }
+  const hasDsatMarker = /\bid\s*=\s*["']carpark_data["']/i.test(html)
+    || /carpark_detail\.aspx|images[\\/]carpark_/i.test(decodeHtmlEntities(html));
+  if (!hasDsatMarker) {
+    throw new ParkingParseError('Invalid DSAT parking HTML marker is missing');
+  }
   const facilities: ParkingFacility[] = [];
   const seenIds = new Set<string>();
   for (const match of html.matchAll(ROW_PATTERN)) {
@@ -187,7 +204,8 @@ export function parseParkingRealtimeHtml(html: string): ParkingFacility[] {
     const id = extractOfficialId(row);
     const name = extractFacilityName(row);
     if (!id || !name || seenIds.has(id)) continue;
-    const spaces = { ...emptySpaces(), ...extractSpaces(row) };
+    const suspended = isSuspended(row);
+    const spaces = suspended ? emptySpaces() : { ...emptySpaces(), ...extractSpaces(row) };
     const candidate = {
       id,
       name,
@@ -197,12 +215,15 @@ export function parseParkingRealtimeHtml(html: string): ParkingFacility[] {
       longitude: null,
       spaces,
       updatedAt: parseUpdatedAt(row),
-      suspended: isSuspended(row),
+      suspended,
     };
     const parsed = ParkingFacilitySchema.safeParse(candidate);
     if (!parsed.success) continue;
     seenIds.add(id);
     facilities.push(parsed.data);
+  }
+  if (facilities.length === 0) {
+    throw new ParkingParseError();
   }
   return facilities;
 }

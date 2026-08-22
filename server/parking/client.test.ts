@@ -94,6 +94,31 @@ describe('DSAT parking client', () => {
     expect(stale.facilities[0]?.id).toBe('12345');
   });
 
+  it('maps a non-DSAT 200 response to invalid-html and retains a prior success as stale', async () => {
+    const invalidFetcher = vi.fn(async () => new Response('<html><body>login required</body></html>', { status: 200 }));
+    const invalidClient = createParkingClient({ fetch: invalidFetcher, endpoint });
+
+    await expect(invalidClient.fetchSnapshot()).rejects.toMatchObject({
+      code: 'invalid-html',
+    });
+    await expect(invalidClient.fetchSnapshot()).rejects.toBeInstanceOf(ParkingClientError);
+
+    let now = new Date('2026-08-22T02:00:00.000Z');
+    const fetcher = createFetcher();
+    const client = createParkingClient({ fetch: fetcher, endpoint, now: () => now, cacheTtlMs: 5_000 });
+    await client.fetchSnapshot();
+    now = new Date(now.getTime() + 6_000);
+    fetcher.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === endpoint) return new Response('<div id="carpark_data"><p>no valid rows</p></div>', { status: 200 });
+      throw new Error('detail should not be requested after invalid realtime HTML');
+    });
+
+    const stale = await client.fetchSnapshot();
+
+    expect(stale.stale).toBe(true);
+    expect(stale.facilities[0]?.id).toBe('12345');
+  });
+
   it('aborts a hanging official response at the configured timeout', async () => {
     vi.useFakeTimers();
     const fetcher = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
@@ -130,5 +155,57 @@ describe('DSAT parking client', () => {
     controller.abort();
 
     await expect(pending).rejects.toMatchObject({ code: 'aborted' });
+  });
+
+  it('keeps a shared pending refresh alive when only one caller aborts', async () => {
+    let resolveMain: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === endpoint) {
+        return new Promise<Response>((resolve, reject) => {
+          resolveMain = resolve;
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+        });
+      }
+      return Promise.resolve(new Response(detailFixture, { status: 200 }));
+    });
+    const client = createParkingClient({ fetch: fetcher, endpoint });
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const first = client.fetchSnapshot(firstController.signal);
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = client.fetchSnapshot(secondController.signal);
+    firstController.abort();
+    const firstRejection = expect(first).rejects.toMatchObject({ code: 'aborted' });
+    resolveMain?.(new Response(realtimeFixture, { status: 200 }));
+
+    await firstRejection;
+    await expect(second).resolves.toMatchObject({ stale: false, facilities: expect.any(Array) });
+    expect(fetcher.mock.calls.filter(([input]) => String(input) === endpoint)).toHaveLength(1);
+  });
+
+  it('stops detail enrichment at an aggregate budget and returns realtime rows without remaining details', async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === endpoint) return Promise.resolve(new Response(realtimeFixture, { status: 200 }));
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+      });
+    });
+    const client = createParkingClient({
+      fetch: fetcher,
+      endpoint,
+      timeoutMs: 1_000,
+      detailBudgetMs: 10,
+    });
+    const pending = client.fetchSnapshot();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const snapshot = await pending;
+
+    expect(snapshot.stale).toBe(false);
+    expect(snapshot.facilities).toHaveLength(2);
+    expect(snapshot.facilities.every((facility) => facility.location === null && facility.entrance === null)).toBe(true);
   });
 });

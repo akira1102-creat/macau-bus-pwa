@@ -79,6 +79,19 @@ describe('Netlify GET /api/parking', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it('serves a stale snapshot during the refresh cooldown without another DSAT refresh', async () => {
+    const fetcher = stubUpstream();
+
+    const first = await parkingHandler(request(), {} as ParkingContext);
+    const second = await parkingHandler(request(), {} as ParkingContext);
+    const body = await second.json() as { stale: boolean };
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(body.stale).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it('maps an upstream failure to a safe 502 without leaking HTML or error details', async () => {
     const logSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const fetcher = vi.fn(async () => { throw new Error('<html>private synthetic upstream error</html>'); });
