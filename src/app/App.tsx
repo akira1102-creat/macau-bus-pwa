@@ -12,7 +12,7 @@ import type { DirectionId, TransitCatalog } from '../../shared/transit-contract'
 import { AppShell } from '../components/AppShell';
 import { StateMessage } from '../components/StateMessage';
 import { messages } from '../i18n/messages';
-import { parseRoute, navigateTo, type AppRoute, type AppTab } from './router';
+import { parseRoute, navigateTo, type AppRoute, type AppTab, type ParkingSourceTab } from './router';
 import { HomePage } from '../features/home/HomePage';
 import { RouteDirectoryPage } from '../features/routes/RouteDirectoryPage';
 import { RoutePage } from '../features/routes/RoutePage';
@@ -142,6 +142,14 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
     lastRoutesByMode.current.bus = nextRoute;
     navigateTo(nextRoute);
   }, [activeMode, appRoute.directionId, appRoute.routeId]);
+  const handleParkingQueryChange = useCallback((nextQuery: string) => {
+    const normalized = nextQuery.trim();
+    navigateTo({
+      mode: 'parking',
+      tab: 'search',
+      ...(normalized ? { query: normalized } : {}),
+    }, true);
+  }, []);
   const handleThemeChange = (nextTheme: Theme) => {
     const next = preferences.setTheme(nextTheme);
     setTheme(next.theme);
@@ -168,8 +176,22 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
             client={parkingClient}
             preferences={preferences}
             getCurrentPosition={getCurrentPosition}
-            onOpenDetail={(parkingId) => navigateTo({ mode: 'parking', tab: 'detail', parkingId, ...(appRoute.query === undefined ? {} : { query: appRoute.query }) })}
-            onBack={() => navigateTo({ mode: 'parking', tab: appRoute.query ? 'search' : 'nearby', ...(appRoute.query === undefined ? {} : { query: appRoute.query }) })}
+            onQueryChange={handleParkingQueryChange}
+            onOpenDetail={(parkingId, sourceTab: ParkingSourceTab) => navigateTo({
+              mode: 'parking',
+              tab: 'detail',
+              parkingId,
+              sourceTab,
+              ...(sourceTab === 'search' && appRoute.query === undefined ? {} : sourceTab === 'search' ? { query: appRoute.query } : {}),
+            })}
+            onBack={() => {
+              const sourceTab = appRoute.sourceTab ?? (appRoute.query ? 'search' : 'nearby');
+              navigateTo({
+                mode: 'parking',
+                tab: sourceTab,
+                ...(sourceTab === 'search' && appRoute.query === undefined ? {} : sourceTab === 'search' ? { query: appRoute.query } : {}),
+              });
+            }}
             {...(onParkingAlertRequest === undefined ? {} : { onRequestAlert: onParkingAlertRequest })}
           />
         )

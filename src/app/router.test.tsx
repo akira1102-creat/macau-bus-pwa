@@ -41,6 +41,40 @@ describe('app route direction navigation', () => {
     });
   });
 
+  it('preserves the parking detail return source and search query in deep links', () => {
+    const parsed = parseRoute(new URL('https://example.test/?mode=parking&tab=detail&parking=42&from=map&q=%E6%B0%B4%E5%9D%91') as unknown as Location);
+
+    expect(parsed).toEqual({
+      mode: 'parking',
+      tab: 'detail',
+      parkingId: '42',
+      query: '水坑',
+      sourceTab: 'map',
+    });
+    window.history.replaceState(null, '', '/macau-bus-pwa/');
+    expect(routeUrl(parsed)).toBe('/macau-bus-pwa/?mode=parking&tab=detail&parking=42&q=%E6%B0%B4%E5%9D%91&from=map');
+  });
+
+  it('resolves legacy bus route deep links even when parking mode is remembered', () => {
+    const parsed = parseRoute(
+      new URL('https://example.test/?tab=routes&route=1&direction=1') as unknown as Location,
+      'parking',
+    );
+
+    expect(parsed).toEqual({ mode: 'bus', tab: 'routes', routeId: '1', directionId: 1 });
+  });
+
+  it('keeps an explicit bus mode when parsing and navigating over a parking preference', () => {
+    const parsed = parseRoute(
+      new URL('https://example.test/?mode=bus&tab=routes&route=1&direction=0') as unknown as Location,
+      'parking',
+    );
+
+    expect(parsed).toEqual({ mode: 'bus', tab: 'routes', routeId: '1', directionId: 0 });
+    window.history.replaceState(null, '', '/macau-bus-pwa/');
+    expect(routeUrl(parsed)).toBe('/macau-bus-pwa/?mode=bus&tab=routes&route=1&direction=0');
+  });
+
   it('round-trips a parking detail URL and exposes exact mode navigation sets', () => {
     const parkingRoute = { mode: 'parking' as const, tab: 'detail' as const, parkingId: '42' };
     window.history.replaceState(null, '', '/macau-bus-pwa/');

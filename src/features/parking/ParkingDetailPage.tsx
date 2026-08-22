@@ -11,16 +11,21 @@ export interface ParkingDetailPageProps {
   onRequestAlert?: (facility: ParkingFacility) => void;
   openNavigation?: (facility: ParkingFacility) => string;
   onBack: () => void;
+  updatedAt?: string | null;
+  stale?: boolean;
+  error?: unknown;
+  onRefresh?: () => void;
 }
 
-function freshness(facility: ParkingFacility): string {
+function freshness(facility: ParkingFacility, updatedAt: string | null | undefined): string {
   if (facility.suspended) {
     return '目前暫停提供即時空位。';
   }
-  if (!facility.updatedAt) {
+  const observedAt = updatedAt ?? facility.updatedAt;
+  if (!observedAt) {
     return '更新時間未知。';
   }
-  const date = new Date(facility.updatedAt);
+  const date = new Date(observedAt);
   return Number.isNaN(date.valueOf()) ? '更新時間未知。' : messages.parkingLastUpdated(date.toLocaleString('zh-Hant'));
 }
 
@@ -31,6 +36,10 @@ export function ParkingDetailPage({
   onRequestAlert,
   openNavigation = openParkingNavigation,
   onBack,
+  updatedAt = null,
+  stale = false,
+  error,
+  onRefresh,
 }: ParkingDetailPageProps) {
   const spaces = [
     [messages.parkingSpaces, facility.spaces.car],
@@ -50,8 +59,15 @@ export function ParkingDetailPage({
       <header className="parking-detail-title">
         <h1>{facility.name}</h1>
         <p>{facility.location ?? '位置未提供'}</p>
-        <small>{freshness(facility)}</small>
+        <small>{freshness(facility, updatedAt)}</small>
       </header>
+      {stale ? <p className="parking-stale-message" role="status">{messages.parkingStale}</p> : null}
+      {error ? (
+        <p className="parking-error-message" role="alert">
+          {messages.parkingUnavailable}
+          {onRefresh ? <button type="button" className="text-button" onClick={onRefresh}>{messages.refresh}</button> : null}
+        </p>
+      ) : null}
       <section className="parking-detail-space-list" aria-label="泊車空位詳情">
         {spaces.map(([label, value]) => (
           <div className="parking-detail-space" key={label}>

@@ -68,4 +68,33 @@ describe('ParkingListPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '開啟停車場 甲停車場' }));
     expect(onOpenDetail).toHaveBeenCalledWith('42');
   });
+
+  it('shows supplied electric car and electric motorcycle counts in each row', () => {
+    render(<ParkingListPage
+      facilities={[facility('42', { spaces: { car: 12, motorcycle: 4, electricCar: 2, electricMotorcycle: 1, accessible: 3 } })]}
+      updatedAt="2026-08-22T10:00:00+08:00"
+      preferences={createLocalPreferences({ storage: new MemoryStorage() })}
+      onOpenDetail={vi.fn()}
+    />);
+
+    expect(screen.getByText('電動車 2')).toBeVisible();
+    expect(screen.getByText('電動電單車 1')).toBeVisible();
+  });
+
+  it('uses the parent-owned search query and reports edits for URL synchronisation', () => {
+    const onQueryChange = vi.fn();
+    render(<ParkingListPage
+      facilities={[facility('42')]}
+      updatedAt="2026-08-22T10:00:00+08:00"
+      query="澳門"
+      onQueryChange={onQueryChange}
+      preferences={createLocalPreferences({ storage: new MemoryStorage() })}
+      onOpenDetail={vi.fn()}
+    />);
+
+    const input = screen.getByRole('searchbox', { name: '搜尋停車場名稱或位置' });
+    expect(input).toHaveValue('澳門');
+    fireEvent.change(input, { target: { value: '氹仔' } });
+    expect(onQueryChange).toHaveBeenCalledWith('氹仔');
+  });
 });

@@ -3,6 +3,7 @@ import type { DirectionId } from '../../shared/transit-contract';
 import type { AppMode } from '../infra/local-preferences';
 
 export type AppTab = 'nearby' | 'routes' | 'map' | 'search' | 'favorites' | 'settings' | 'detail';
+export type ParkingSourceTab = 'nearby' | 'map' | 'search' | 'favorites';
 
 export const BUS_NAVIGATION_TABS = ['nearby', 'routes', 'map', 'favorites', 'settings'] as const;
 export const PARKING_NAVIGATION_TABS = ['nearby', 'map', 'search', 'favorites', 'settings'] as const;
@@ -14,6 +15,7 @@ export interface AppRoute {
   directionId?: DirectionId;
   parkingId?: string;
   query?: string;
+  sourceTab?: ParkingSourceTab;
 }
 
 function isMode(value: string | null): value is AppMode {
@@ -28,6 +30,10 @@ function isTab(value: string | null): value is AppTab {
     || value === 'favorites'
     || value === 'settings'
     || value === 'detail';
+}
+
+function isParkingSourceTab(value: string | null): value is ParkingSourceTab {
+  return value === 'nearby' || value === 'map' || value === 'search' || value === 'favorites';
 }
 
 export function getNavigationTabs(mode: AppMode): readonly AppTab[] {
@@ -53,25 +59,34 @@ function parseDirectionId(value: string | null): DirectionId | undefined {
 export function parseRoute(location: Location = window.location, preferredMode: AppMode = 'bus'): AppRoute {
   const params = new URLSearchParams(location.search);
   const explicitMode = params.get('mode');
-  const mode = isMode(explicitMode) ? explicitMode : preferredMode;
   const tabValue = params.get('tab');
-  const tab = isTab(tabValue) && isValidTabForMode(tabValue, mode) ? tabValue : 'nearby';
   const routeId = params.get('route')?.trim() || undefined;
   const directionId = parseDirectionId(params.get('direction'));
   const parkingId = params.get('parking')?.trim() || params.get('parkingId')?.trim() || undefined;
   const query = params.get('q')?.trim() || undefined;
+  const sourceValue = params.get('from');
+  const sourceTab = isParkingSourceTab(sourceValue) ? sourceValue : undefined;
+  const explicitAppMode = isMode(explicitMode) ? explicitMode : undefined;
+  const legacyBusLink = explicitAppMode === undefined
+    && (tabValue === 'routes' || routeId !== undefined || directionId !== undefined);
+  const mode = explicitAppMode ?? (legacyBusLink ? 'bus' : preferredMode);
+  const tab = isTab(tabValue) && isValidTabForMode(tabValue, mode) ? tabValue : 'nearby';
   if (mode === 'parking') {
     return {
       mode: 'parking',
       tab,
       ...(parkingId === undefined ? {} : { parkingId }),
       ...(query === undefined ? {} : { query }),
+      ...(tab === 'detail' && sourceTab ? { sourceTab } : {}),
     };
   }
   if (!routeId) {
-    return { tab };
+    return explicitAppMode === 'bus' || legacyBusLink ? { mode: 'bus', tab } : { tab };
   }
-  return directionId === undefined ? { tab, routeId } : { tab, routeId, directionId };
+  const route = directionId === undefined ? { tab, routeId } : { tab, routeId, directionId };
+  return explicitAppMode === 'bus' || (legacyBusLink && preferredMode !== 'bus')
+    ? { mode: 'bus', ...route }
+    : route;
 }
 
 export function routeUrl(route: AppRoute): string {
@@ -89,6 +104,9 @@ export function routeUrl(route: AppRoute): string {
     }
     if (route.query) {
       params.set('q', route.query);
+    }
+    if (route.sourceTab) {
+      params.set('from', route.sourceTab);
     }
   } else {
     if (route.routeId) {

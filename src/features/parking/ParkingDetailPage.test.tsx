@@ -32,4 +32,23 @@ describe('ParkingDetailPage', () => {
     expect(onRequestAlert).toHaveBeenCalledWith(facility);
     expect(screen.getByText(/資料來自 DSAT/)).toBeVisible();
   });
+
+  it('shows retained-data freshness/error state with a retry action', () => {
+    const onRefresh = vi.fn();
+    render(<ParkingDetailPage
+      facility={{ ...facility, suspended: false, updatedAt: '2026-08-22T10:00:00+08:00' }}
+      favorite={false}
+      onToggleFavorite={vi.fn()}
+      stale
+      error={new Error('offline')}
+      onRefresh={onRefresh}
+      onBack={vi.fn()}
+    />);
+
+    expect(screen.getByText('目前顯示較早的泊車位資料。')).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('暫時無法取得泊車位資料。');
+    expect(screen.getByText(/更新：/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
 });

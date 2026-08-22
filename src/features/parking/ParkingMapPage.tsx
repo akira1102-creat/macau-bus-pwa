@@ -10,17 +10,46 @@ export interface ParkingMapPageProps {
   facilities: readonly ParkingFacility[];
   selectedId: string | null;
   onSelectFacility: (parkingId: string) => void;
+  updatedAt?: string | null;
+  stale?: boolean;
+  error?: unknown;
+  onRefresh?: () => void;
 }
 
 interface MapRefs {
   map: Leaflet.Map | null;
   layer: Leaflet.LayerGroup | null;
   leaflet: typeof Leaflet | null;
+  coordinateKey: string;
 }
 
-export function ParkingMapPage({ facilities, selectedId, onSelectFacility }: ParkingMapPageProps) {
+export function createParkingTooltipContent(name: string): HTMLElement {
+  const content = document.createElement('span');
+  content.textContent = name;
+  return content;
+}
+
+function updatedCopy(updatedAt: string | null | undefined): string {
+  if (!updatedAt) {
+    return '更新時間未知';
+  }
+  const date = new Date(updatedAt);
+  return Number.isNaN(date.valueOf())
+    ? '更新時間未知'
+    : messages.parkingLastUpdated(date.toLocaleString('zh-Hant', { hour: '2-digit', minute: '2-digit' }));
+}
+
+export function ParkingMapPage({
+  facilities,
+  selectedId,
+  onSelectFacility,
+  updatedAt = null,
+  stale = false,
+  error,
+  onRefresh,
+}: ParkingMapPageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const refs = useRef<MapRefs>({ map: null, layer: null, leaflet: null });
+  const refs = useRef<MapRefs>({ map: null, layer: null, leaflet: null, coordinateKey: '' });
   const facilitiesRef = useRef(facilities);
   const [mapStatus, setMapStatus] = useState<'loading' | 'ready' | 'unavailable' | 'offline' | 'tile-error'>(
     () => (typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'loading'),
@@ -34,6 +63,11 @@ export function ParkingMapPage({ facilities, selectedId, onSelectFacility }: Par
     }
     layer.clearLayers();
     const mappable = facilitiesRef.current.filter(parkingHasCoordinates);
+    const coordinateKey = mappable
+      .map((facility) => `${facility.id}:${facility.latitude}:${facility.longitude}`)
+      .sort()
+      .join('|');
+    const shouldFitBounds = coordinateKey !== refs.current.coordinateKey;
     mappable.forEach((facility) => {
       const marker = L.marker([facility.latitude, facility.longitude], {
         icon: L.divIcon({
@@ -43,11 +77,12 @@ export function ParkingMapPage({ facilities, selectedId, onSelectFacility }: Par
           iconAnchor: [24, 16],
         }),
       });
-      marker.bindTooltip(facility.name, { direction: 'top', offset: [0, -12] });
+      marker.bindTooltip(createParkingTooltipContent(facility.name), { direction: 'top', offset: [0, -12] });
       marker.on('click', () => onSelectFacility(facility.id));
       marker.addTo(layer);
     });
-    if (mappable.length > 0) {
+    refs.current.coordinateKey = coordinateKey;
+    if (shouldFitBounds && mappable.length > 0) {
       map.fitBounds(mappable.map((facility) => [facility.latitude, facility.longitude] as [number, number]), { padding: [24, 24] });
     }
   };
@@ -74,7 +109,7 @@ export function ParkingMapPage({ facilities, selectedId, onSelectFacility }: Par
         }
       });
       tiles.addTo(map);
-      refs.current = { map, layer: L.layerGroup().addTo(map), leaflet: L };
+      refs.current = { map, layer: L.layerGroup().addTo(map), leaflet: L, coordinateKey: '' };
       setMapStatus((current) => current === 'offline' || current === 'tile-error' ? current : 'ready');
       drawMarkers();
       window.setTimeout(() => map.invalidateSize(), 0);
@@ -88,7 +123,7 @@ export function ParkingMapPage({ facilities, selectedId, onSelectFacility }: Par
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('online', handleOnline);
       refs.current.map?.remove();
-      refs.current = { map: null, layer: null, leaflet: null };
+      refs.current = { map: null, layer: null, leaflet: null, coordinateKey: '' };
     };
   }, []);
 
@@ -98,7 +133,14 @@ export function ParkingMapPage({ facilities, selectedId, onSelectFacility }: Par
 
   return (
     <div className="parking-map-page">
-      <header className="page-heading"><h1>{messages.parkingMap}</h1><p>{messages.parkingSourceNote}</p></header>
+      <header className="page-heading"><h1>{messages.parkingMap}</h1><p>{messages.parkingSourceNote}</p><small>{updatedCopy(updatedAt)}</small></header>
+      {stale ? <p className="parking-stale-message" role="status">{messages.parkingStale}</p> : null}
+      {error ? (
+        <p className="parking-error-message" role="alert">
+          {messages.parkingUnavailable}
+          {onRefresh ? <button type="button" className="text-button" onClick={onRefresh}>{messages.refresh}</button> : null}
+        </p>
+      ) : null}
       <div className="parking-map-shell">
         <div className="parking-map" ref={containerRef} role="region" aria-label="OpenStreetMap 泊車地圖" />
         {mapStatus === 'unavailable' ? <p className="map-status-banner" role="status">地圖暫時無法使用；仍可從下方列表選取停車場。</p> : null}

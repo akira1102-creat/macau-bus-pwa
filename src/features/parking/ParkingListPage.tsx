@@ -26,6 +26,8 @@ export interface ParkingListPageProps {
   title?: string;
   searchEnabled?: boolean;
   initialQuery?: string;
+  query?: string;
+  onQueryChange?: (query: string) => void;
 }
 
 function locationErrorMessage(error: unknown): string {
@@ -59,8 +61,11 @@ export function ParkingListPage({
   title = messages.parkingNearby,
   searchEnabled = true,
   initialQuery = '',
+  query,
+  onQueryChange,
 }: ParkingListPageProps) {
-  const [query, setQuery] = useState(initialQuery);
+  const [localQuery, setLocalQuery] = useState(initialQuery);
+  const currentQuery = query ?? localQuery;
   const [sort, setSort] = useState<ParkingSort>('distance');
   const [position, setPosition] = useState<CurrentPosition | null>(null);
   const [locationState, setLocationState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -74,8 +79,8 @@ export function ParkingListPage({
     [facilities, favoritesOnly, preferenceState.parkingFavorites],
   );
   const visibleFacilities = useMemo(
-    () => filterAndSortParkingFacilities(candidates, { query, sort, position }),
-    [candidates, position, query, sort],
+    () => filterAndSortParkingFacilities(candidates, { query: currentQuery, sort, position }),
+    [candidates, currentQuery, position, sort],
   );
 
   const requestLocation = async () => {
@@ -97,6 +102,13 @@ export function ParkingListPage({
     setPreferenceState(preferences.toggleParkingFavorite(parkingId));
   };
 
+  const handleQueryChange = (nextQuery: string) => {
+    if (query === undefined) {
+      setLocalQuery(nextQuery);
+    }
+    onQueryChange?.(nextQuery);
+  };
+
   return (
     <div className="parking-page parking-list-page">
       <header className="page-heading">
@@ -111,8 +123,8 @@ export function ParkingListPage({
             type="search"
             aria-label={messages.parkingSearchPlaceholder}
             placeholder={messages.parkingSearchPlaceholder}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            value={currentQuery}
+            onChange={(event) => handleQueryChange(event.target.value)}
           />
         </label>
       ) : null}
@@ -151,8 +163,10 @@ export function ParkingListPage({
                 <span className="parking-row-spaces"><b>{displayParkingSpace(facility.spaces.car, facility.suspended)}</b><small>{messages.parkingSpaces}</small></span>
                 <span className="parking-row-meta">
                   <span>{formatParkingDistance(distance)}</span>
-                  <span>電單車 {displayParkingSpace(facility.spaces.motorcycle, facility.suspended)}</span>
-                  <span>無障礙 {displayParkingSpace(facility.spaces.accessible, facility.suspended)}</span>
+                  <span>{messages.parkingMotorcycle} {displayParkingSpace(facility.spaces.motorcycle, facility.suspended)}</span>
+                  <span>{messages.parkingElectricCar} {displayParkingSpace(facility.spaces.electricCar, facility.suspended)}</span>
+                  <span>{messages.parkingElectricMotorcycle} {displayParkingSpace(facility.spaces.electricMotorcycle, facility.suspended)}</span>
+                  <span>{messages.parkingAccessible} {displayParkingSpace(facility.spaces.accessible, facility.suspended)}</span>
                 </span>
               </button>
               <button

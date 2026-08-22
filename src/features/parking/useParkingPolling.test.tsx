@@ -10,7 +10,7 @@ import { useParkingPolling } from './useParkingPolling';
 const snapshot: ParkingSnapshot = { updatedAt: '2026-08-22T10:00:00+08:00', stale: false, facilities: [] };
 
 function Probe({ client }: { client: ParkingApiClient }) {
-  const state = useParkingPolling(client, { intervalMs: 20 });
+  const state = useParkingPolling(client, { intervalMs: 1_000 });
   return <output data-testid="state">{state.status}:{state.data?.updatedAt ?? 'none'}</output>;
 }
 
