@@ -251,8 +251,13 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
       if (status === 404 || status === 410) {
         deadSubscriptions.add(item.subscription.id);
         result.deadSubscriptions += 1;
-        await deleteSubscriptionAndAlerts(item.subscription.id, dependencies.stores);
-        result.deleted += pending.filter((candidate) => candidate.subscription.id === item.subscription.id).length;
+        try {
+          await deleteSubscriptionAndAlerts(item.subscription.id, dependencies.stores);
+          result.deleted += pending.filter((candidate) => candidate.subscription.id === item.subscription.id).length;
+        } catch {
+          // A dead provider must not abort the rest of the scheduled run.
+          result.errors += 1;
+        }
       } else {
         if (isTransientPushFailure(error)) {
           try { await releaseClaim(item.storageKey, claimId, dependencies); } catch { /* retry can reclaim after expiry */ }

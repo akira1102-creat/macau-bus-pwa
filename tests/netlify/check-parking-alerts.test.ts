@@ -31,6 +31,7 @@ const subscription: StoredSubscription = {
 let subscriptions: MemoryBlobStore<StoredSubscription>;
 let alerts: MemoryBlobStore<StoredParkingAlert>;
 let reservations: MemoryBlobStore<PushReservation>;
+let parkingReservations: MemoryBlobStore<PushReservation>;
 let now: Date;
 let sent: Array<{ payload: string; subscriptionId: string }>;
 
@@ -60,10 +61,11 @@ function setup(fetchParking: ParkingAlertCheckDependencies['fetchParking'] = vi.
   subscriptions = new MemoryBlobStore<StoredSubscription>();
   alerts = new MemoryBlobStore<StoredParkingAlert>();
   reservations = new MemoryBlobStore<PushReservation>();
+  parkingReservations = new MemoryBlobStore<PushReservation>();
   sent = [];
   void subscriptions.set(subscription.id, subscription);
   return {
-    stores: { subscriptions, alerts: new MemoryBlobStore(), reservations, parkingAlerts: alerts },
+    stores: { subscriptions, alerts: new MemoryBlobStore(), reservations, parkingAlerts: alerts, parkingReservations },
     now: () => new Date(now),
     fetchParking,
     sendNotification: async (value, payload) => { sent.push({ subscriptionId: value.id, payload }); await sendNotification(value, payload); },
@@ -127,5 +129,36 @@ describe('minute parking alert checker', () => {
     expect(result.deadSubscriptions).toBe(1);
     expect(await subscriptions.get(subscription.id)).toBeUndefined();
     expect(await alerts.get(key('dead'))).toBeUndefined();
+  });
+
+  it('counts cleanup failures safely and continues checking other subscriptions', async () => {
+    const secondSubscription: StoredSubscription = {
+      ...subscription,
+      id: 'subscription-parking-2',
+      endpoint: 'https://fcm.googleapis.com/fcm/send/parking-check-2',
+    };
+    const sender = vi.fn()
+      .mockRejectedValueOnce({ statusCode: 410 })
+      .mockResolvedValueOnce(undefined);
+    const dependencies = setup(vi.fn(async () => snapshot([facility('42', 1), facility('43', 1)])), sender);
+    await subscriptions.set(secondSubscription.id, secondSubscription);
+    await alerts.set(key('dead-cleanup'), alert('dead-cleanup', '42', 2));
+    await alerts.set(`${secondSubscription.id}/healthy`, {
+      ...alert('healthy', '43', 2),
+      id: 'healthy',
+      subscriptionId: secondSubscription.id,
+    });
+    const deleteAlert = alerts.delete.bind(alerts);
+    vi.spyOn(alerts, 'delete').mockImplementation(async (storageKey) => {
+      if (storageKey === key('dead-cleanup')) throw new Error('blob cleanup failed');
+      await deleteAlert(storageKey);
+    });
+
+    const result = await runParkingAlertCheck(dependencies);
+
+    expect(result.deadSubscriptions).toBe(1);
+    expect(result.errors).toBe(1);
+    expect(result.sent).toBe(1);
+    expect(await alerts.get(`${secondSubscription.id}/healthy`)).toBeUndefined();
   });
 });

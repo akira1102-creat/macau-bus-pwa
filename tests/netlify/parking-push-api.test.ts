@@ -14,6 +14,7 @@ const allowedOrigin = 'https://akira1102-creat.github.io';
 
 class MemoryBlobStore<T extends { id: string }> implements JsonBlobStore<T> {
   readonly values = new Map<string, T>();
+  failNextSet: Error | undefined;
   private readonly versions = new Map<string, number>();
 
   async get(key: string): Promise<T | undefined> { return this.values.get(key); }
@@ -22,6 +23,11 @@ class MemoryBlobStore<T extends { id: string }> implements JsonBlobStore<T> {
     return value === undefined ? undefined : { value, etag: String(this.versions.get(key) ?? 0) };
   }
   async set(key: string, value: T): Promise<void> {
+    if (this.failNextSet) {
+      const failure = this.failNextSet;
+      this.failNextSet = undefined;
+      throw failure;
+    }
     this.values.set(key, value);
     this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
   }
@@ -49,6 +55,7 @@ type PushContext = Parameters<ReturnType<typeof createPushSubscriptionsHandler>>
 let subscriptions: MemoryBlobStore<StoredSubscription>;
 let alerts: MemoryBlobStore<StoredParkingAlert>;
 let reservations: MemoryBlobStore<PushReservation>;
+let parkingReservations: MemoryBlobStore<PushReservation>;
 let dependencies: PushApiDependencies;
 let now: Date;
 
@@ -77,8 +84,9 @@ beforeEach(() => {
   subscriptions = new MemoryBlobStore<StoredSubscription>();
   alerts = new MemoryBlobStore<StoredParkingAlert>();
   reservations = new MemoryBlobStore<PushReservation>();
+  parkingReservations = new MemoryBlobStore<PushReservation>();
   dependencies = {
-    stores: { subscriptions, alerts: new MemoryBlobStore(), reservations, parkingAlerts: alerts },
+    stores: { subscriptions, alerts: new MemoryBlobStore(), reservations, parkingAlerts: alerts, parkingReservations },
     now: () => new Date(now),
   };
 });
@@ -160,5 +168,88 @@ describe('parking push alert API', () => {
     }, auth(identity)), context());
     expect(invalid.status).toBe(400);
     expect(JSON.stringify([...alerts.values.values()])).not.toContain(identity.alertToken);
+  });
+
+  it('returns a safe 503 when capability authentication storage fails', async () => {
+    const throwingSubscriptions: JsonBlobStore<StoredSubscription> = {
+      get: vi.fn().mockRejectedValue(new Error('private blob detail')),
+      getWithMetadata: vi.fn().mockRejectedValue(new Error('private blob detail')),
+      set: vi.fn(),
+      setIfNew: vi.fn(),
+      setIfMatch: vi.fn(),
+      delete: vi.fn(),
+      list: vi.fn().mockRejectedValue(new Error('private blob detail')),
+    };
+    const handler = createParkingPushAlertsHandler({
+      ...dependencies,
+      stores: { ...dependencies.stores, subscriptions: throwingSubscriptions },
+    });
+    const response = await handler(request('/api/push/parking-alerts', 'GET', undefined, {
+      Authorization: 'Bearer token',
+    }), context());
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'storage-unavailable' });
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('keeps the previous facility alert when a replacement write fails', async () => {
+    const subscriptionsHandler = createPushSubscriptionsHandler(dependencies);
+    const response = await subscriptionsHandler(request('/api/push/subscriptions', 'POST', {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/parking-replacement',
+      keys: { p256dh: 'public-key', auth: 'auth-secret' },
+    }), {} as PushContext);
+    const identity = await response.json() as { subscriptionId: string; alertToken: string };
+    const handler = createParkingPushAlertsHandler(dependencies);
+    const headers = auth(identity);
+    const first = await handler(request('/api/push/parking-alerts', 'POST', {
+      parkingId: '42', parkingName: '甲停車場', threshold: 10,
+    }, headers), context());
+    const firstSummary = await first.json() as { id: string };
+
+    alerts.failNextSet = new Error('private blob detail');
+    const replacement = await handler(request('/api/push/parking-alerts', 'POST', {
+      parkingId: '42', parkingName: '甲停車場', threshold: 4,
+    }, headers), context());
+
+    expect(replacement.status).toBe(503);
+    expect(await alerts.get(`${identity.subscriptionId}/${firstSummary.id}`)).toMatchObject({ threshold: 10 });
+  });
+
+  it('serializes DELETE with POST using the same subscription mutation reservation', async () => {
+    const subscriptionsHandler = createPushSubscriptionsHandler(dependencies);
+    const response = await subscriptionsHandler(request('/api/push/subscriptions', 'POST', {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/parking-race',
+      keys: { p256dh: 'public-key', auth: 'auth-secret' },
+    }), {} as PushContext);
+    const identity = await response.json() as { subscriptionId: string; alertToken: string };
+    const handler = createParkingPushAlertsHandler(dependencies);
+    const headers = auth(identity);
+    const created = await handler(request('/api/push/parking-alerts', 'POST', {
+      parkingId: '42', parkingName: '甲停車場', threshold: 10,
+    }, headers), context());
+    const summary = await created.json() as { id: string };
+    const storageKey = `${identity.subscriptionId}/${summary.id}`;
+    let startedResolve!: () => void;
+    const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+    let releaseResolve!: () => void;
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    const getAlert = alerts.get.bind(alerts);
+    vi.spyOn(alerts, 'get').mockImplementation(async (key) => {
+      if (key === storageKey) {
+        startedResolve();
+        await release;
+      }
+      return getAlert(key);
+    });
+
+    const deleting = handler(request(`/api/push/parking-alerts/${summary.id}`, 'DELETE', undefined, headers), context(summary.id));
+    await started;
+    const racingPost = await handler(request('/api/push/parking-alerts', 'POST', {
+      parkingId: '42', parkingName: '甲停車場', threshold: 4,
+    }, headers), context());
+    expect(racingPost.status).toBe(409);
+    releaseResolve();
+    expect((await deleting).status).toBe(200);
   });
 });

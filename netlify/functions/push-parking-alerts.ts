@@ -143,10 +143,20 @@ export function createParkingPushAlertsHandler(
       }
     }
 
-    const subscription = await authenticateSubscription(request, dependencies.stores);
+    let subscription: Awaited<ReturnType<typeof authenticateSubscription>>;
+    try {
+      subscription = await authenticateSubscription(request, dependencies.stores);
+    } catch {
+      return jsonResponse(request, { error: 'storage-unavailable' }, 503, {}, options);
+    }
     if (!subscription) return jsonResponse(request, { error: 'unauthorized' }, 401, {}, options);
     const now = currentTime(dependencies);
-    const store = parkingAlertsStore(dependencies.stores);
+    let store: ReturnType<typeof parkingAlertsStore>;
+    try {
+      store = parkingAlertsStore(dependencies.stores);
+    } catch {
+      return jsonResponse(request, { error: 'storage-unavailable' }, 503, {}, options);
+    }
 
     if (request.method === 'GET') {
       try {
@@ -159,7 +169,10 @@ export function createParkingPushAlertsHandler(
     if (request.method === 'DELETE') {
       const alertId = alertIdFromRequest(request, context);
       if (!alertId) return jsonResponse(request, { error: 'not-found' }, 404, {}, options);
+      let lease: ReservationLease | undefined;
       try {
+        lease = await acquireReservation(subscription.id, dependencies, now);
+        if (!lease) return jsonResponse(request, { error: 'active-limit-busy' }, 409, {}, options);
         const value = await store.get(parkingAlertStorageKey(subscription.id, alertId));
         const parsed = value === undefined ? undefined : StoredParkingAlertSchema.safeParse(value);
         if (!parsed?.success || parsed.data.subscriptionId !== subscription.id) {
@@ -169,6 +182,14 @@ export function createParkingPushAlertsHandler(
         return jsonResponse(request, { deleted: true }, 200, {}, options);
       } catch {
         return jsonResponse(request, { error: 'storage-unavailable' }, 503, {}, options);
+      } finally {
+        if (lease) {
+          try {
+            await releaseReservation(subscription.id, lease, dependencies, now);
+          } catch {
+            // An expired reservation can be safely reclaimed on the next request.
+          }
+        }
       }
     }
 
@@ -195,9 +216,6 @@ export function createParkingPushAlertsHandler(
       if (!existing && active.length >= MAX_ACTIVE_PARKING_ALERTS) {
         return jsonResponse(request, { error: 'active-limit' }, 409, {}, options);
       }
-      if (existing) {
-        await store.delete(parkingAlertStorageKey(subscription.id, existing.id));
-      }
       const randomizer = dependencies.randomBytes ?? randomBytes;
       let id = makeRandomId(randomizer);
       for (let attempt = 0; attempt < 4 && await store.get(parkingAlertStorageKey(subscription.id, id)); attempt += 1) {
@@ -214,6 +232,18 @@ export function createParkingPushAlertsHandler(
       });
       const stored: StoredParkingAlert = { ...summary, subscriptionId: subscription.id, state: 'pending' };
       await store.set(parkingAlertStorageKey(subscription.id, summary.id), stored);
+      if (existing) {
+        try {
+          await store.delete(parkingAlertStorageKey(subscription.id, existing.id));
+        } catch (error) {
+          try {
+            await store.delete(parkingAlertStorageKey(subscription.id, summary.id));
+          } catch {
+            // Best effort rollback; the old record remains the source of truth when possible.
+          }
+          throw error;
+        }
+      }
       return jsonResponse(request, summary, 201, {}, options);
     } catch {
       return jsonResponse(request, { error: 'storage-unavailable' }, 503, {}, options);

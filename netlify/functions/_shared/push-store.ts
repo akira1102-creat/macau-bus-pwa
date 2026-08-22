@@ -140,13 +140,19 @@ export function parkingAlertStorageKey(subscriptionId: string, alertId: string):
   return `${parkingAlertStoragePrefix(subscriptionId)}${alertId}`;
 }
 
-/** Resolve the independently named parking-alert blob store. The fallback only supports old tests. */
+/** Resolve the independently named parking-alert blob store and fail closed if wiring is incomplete. */
 export function parkingAlertsStore(stores: PushStores): JsonBlobStore<StoredParkingAlert> {
-  return stores.parkingAlerts ?? stores.alerts as unknown as JsonBlobStore<StoredParkingAlert>;
+  if (!stores.parkingAlerts) {
+    throw new Error('parking-alert-store-unavailable');
+  }
+  return stores.parkingAlerts;
 }
 
 export function parkingReservationsStore(stores: PushStores): JsonBlobStore<PushReservation> {
-  return stores.parkingReservations ?? stores.reservations;
+  if (!stores.parkingReservations) {
+    throw new Error('parking-reservation-store-unavailable');
+  }
+  return stores.parkingReservations;
 }
 
 export function getPushRateLimiter(): RealtimeRateLimiter {
