@@ -10,4 +10,5 @@ test-results/
 data/upstream/
 public/data/catalog.json
 public/data/provenance.json
-
+# Local Netlify folder
+.netlify

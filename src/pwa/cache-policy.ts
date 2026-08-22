@@ -16,10 +16,22 @@ function isOsmTileUrl(url: URL): boolean {
   return url.hostname === OSM_TILE_HOST || url.hostname.endsWith(`.${OSM_TILE_HOST}`);
 }
 
+function isApiPath(pathname: string): boolean {
+  return /(?:^|\/)api(?:\/|$)/.test(pathname);
+}
+
+function isCatalogPath(pathname: string): boolean {
+  return /(?:^|\/)data\/catalog\.json$/.test(pathname);
+}
+
+function isAssetsPath(pathname: string): boolean {
+  return /(?:^|\/)assets(?:\/|$)/.test(pathname);
+}
+
 /** API responses and public OSM tiles must never be served from a service-worker cache. */
 export function isNetworkOnlyRequest(input: string | URL | { url: string }): boolean {
   const url = requestUrl(input);
-  return url.pathname === '/api' || url.pathname.startsWith('/api/') || isOsmTileUrl(url);
+  return isApiPath(url.pathname) || isOsmTileUrl(url);
 }
 
 export function getCatalogCacheRevision(
@@ -28,7 +40,7 @@ export function getCatalogCacheRevision(
 ): string {
   const catalogEntry = manifest.find((entry) => {
     const url = new URL(entry.url, 'http://localhost/');
-    return url.pathname === '/data/catalog.json';
+    return isCatalogPath(url.pathname);
   });
   const revision = catalogEntry?.revision?.trim();
   return revision || fallbackRevision;
@@ -44,7 +56,7 @@ export function isCacheFirstAssetRequest(input: { url: string; destination?: str
     return false;
   }
   const destination = input.destination ?? '';
-  return url.pathname.startsWith('/assets/')
-    || url.pathname.endsWith('/data/catalog.json')
+  return isAssetsPath(url.pathname)
+    || isCatalogPath(url.pathname)
     || ['script', 'style', 'font', 'image'].includes(destination);
 }

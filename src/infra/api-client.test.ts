@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createRealtimeApiClient, getRealtimeRoute } from './api-client';
 import type { RealtimeApiError } from './api-client';
 
 describe('browser realtime API client', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('requests only the normalized endpoint and strips raw payload fields', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({
       route: '1',
@@ -48,6 +52,23 @@ describe('browser realtime API client', () => {
     await client.getRealtimeRoute('1', 0, controller.signal);
 
     expect(fetcher).toHaveBeenCalledWith('/api/bus/realtime/1/0', expect.objectContaining({ signal: controller.signal }));
+  });
+
+  it('uses the production API origin from VITE_API_BASE_URL', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.test');
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      route: '1',
+      direction: 0,
+      updatedAt: '2026-08-21T00:00:00.000Z',
+      ageSeconds: 0,
+      stale: false,
+      source: 'DSAT observation',
+      buses: [],
+    }), { status: 200 }));
+
+    await getRealtimeRoute('1', 0, { fetch: fetcher });
+
+    expect(fetcher).toHaveBeenCalledWith('https://api.example.test/api/bus/realtime/1/0', expect.objectContaining({ method: 'GET' }));
   });
 
   it('returns a typed error without exposing an error response body', async () => {
