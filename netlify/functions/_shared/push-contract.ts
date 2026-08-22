@@ -70,6 +70,27 @@ export const ArrivalAlertsResponseSchema = z.object({
   alerts: z.array(ArrivalAlertSummarySchema),
 });
 
+export const ParkingAlertInputSchema = z.object({
+  parkingId: z.string().trim().min(1).max(64),
+  parkingName: z.string().trim().min(1).max(200),
+  threshold: z.number().int().min(1).max(100),
+});
+export type ParkingAlertInput = z.infer<typeof ParkingAlertInputSchema>;
+
+export const ParkingAlertSummarySchema = z.object({
+  id: z.string().trim().min(1),
+  parkingId: z.string().trim().min(1).max(64),
+  parkingName: z.string().trim().min(1).max(200),
+  threshold: z.number().int().min(1).max(100),
+  createdAt: z.string().datetime({ offset: true }),
+  expiresAt: z.string().datetime({ offset: true }),
+});
+export type ParkingAlertSummary = z.infer<typeof ParkingAlertSummarySchema>;
+
+export const ParkingAlertsResponseSchema = z.object({
+  alerts: z.array(ParkingAlertSummarySchema),
+});
+
 export const StoredSubscriptionSchema = z.object({
   id: z.string().trim().min(1),
   endpoint: z.string().url().refine(isAllowedPushEndpoint, 'unsupported push provider endpoint'),
@@ -99,3 +120,12 @@ export const StoredAlertSchema = ArrivalAlertSummarySchema.extend({
   deliveredAt: z.string().datetime({ offset: true }).optional(),
 });
 export type StoredAlert = z.infer<typeof StoredAlertSchema>;
+
+export const StoredParkingAlertSchema = ParkingAlertSummarySchema.extend({
+  subscriptionId: z.string().trim().min(1),
+  state: z.enum(['pending', 'claimed', 'delivered']).optional(),
+  claimId: z.string().trim().min(1).optional(),
+  claimExpiresAt: z.string().datetime({ offset: true }).optional(),
+  deliveredAt: z.string().datetime({ offset: true }).optional(),
+});
+export type StoredParkingAlert = z.infer<typeof StoredParkingAlertSchema>;

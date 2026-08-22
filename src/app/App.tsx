@@ -19,6 +19,7 @@ import { RoutePage } from '../features/routes/RoutePage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { ParkingModePage } from '../features/parking/ParkingModePage';
 import { ParkingSettingsControls } from '../features/parking/ParkingSettingsControls';
+import { ParkingAlertSheet } from '../features/parking/ParkingAlertSheet';
 import type { ParkingFacility } from '../../shared/parking-contract';
 
 export interface AppProps {
@@ -64,6 +65,7 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
   const [catalogState, setCatalogState] = useState<{ status: 'loading' | 'ready' | 'error'; catalog: TransitCatalog | null }>({ status: 'loading', catalog: null });
   const [activeModePreference, setActiveModePreference] = useState<AppMode | null>(() => preferences.getActiveMode());
   const [appRoute, setAppRoute] = useState<AppRoute>(() => parseRoute(window.location, preferences.getActiveMode() ?? 'bus'));
+  const [parkingAlertFacility, setParkingAlertFacility] = useState<ParkingFacility | null>(null);
   const lastRoutesByMode = useRef<Partial<Record<AppMode, AppRoute>>>({});
   const [theme, setTheme] = useState<Theme>(() => preferences.getTheme());
 
@@ -154,6 +156,10 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
     const next = preferences.setTheme(nextTheme);
     setTheme(next.theme);
   };
+  const handleParkingAlertRequest = useCallback((facility: ParkingFacility) => {
+    onParkingAlertRequest?.(facility);
+    setParkingAlertFacility(facility);
+  }, [onParkingAlertRequest]);
 
   const selectedRouteId = appRoute.routeId;
   const routeDetail = activeMode === 'bus' && (appRoute.tab === 'routes' || appRoute.tab === 'map') && selectedRouteId !== undefined && repository !== null;
@@ -192,7 +198,7 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
                 ...(sourceTab === 'search' && appRoute.query === undefined ? {} : sourceTab === 'search' ? { query: appRoute.query } : {}),
               });
             }}
-            {...(onParkingAlertRequest === undefined ? {} : { onRequestAlert: onParkingAlertRequest })}
+            onRequestAlert={handleParkingAlertRequest}
           />
         )
       ) : catalogState.status === 'ready' && repository && catalogState.catalog ? (
@@ -224,6 +230,14 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
             <ParkingSettingsControls preferences={preferences} />
           </>
         )
+      ) : null}
+      {activeMode === 'parking' && parkingAlertFacility ? (
+        <ParkingAlertSheet
+          facility={parkingAlertFacility}
+          preferences={preferences}
+          pushClient={pushClient}
+          onClose={() => setParkingAlertFacility(null)}
+        />
       ) : null}
     </AppShell>
   );

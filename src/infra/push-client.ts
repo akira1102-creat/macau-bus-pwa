@@ -36,6 +36,21 @@ export interface ArrivalAlertSummary {
   expiresAt?: string;
 }
 
+export interface ParkingAlertInput {
+  parkingId: string;
+  parkingName: string;
+  threshold: number;
+}
+
+export interface ParkingAlertSummary {
+  id: string;
+  parkingId: string;
+  parkingName: string;
+  threshold: number;
+  createdAt?: string;
+  expiresAt?: string;
+}
+
 export type PushSupportReason = 'notification-unavailable' | 'push-unavailable' | 'service-worker-unavailable' | 'ios-not-standalone';
 
 export interface PushPlatform {
@@ -90,6 +105,9 @@ export interface PushClient {
   listAlerts(): Promise<ArrivalAlertSummary[]>;
   createAlert(input: ArrivalAlertInput): Promise<ArrivalAlertSummary>;
   deleteAlert(id: string): Promise<void>;
+  listParkingAlerts?: () => Promise<ParkingAlertSummary[]>;
+  createParkingAlert?: (input: ParkingAlertInput) => Promise<ParkingAlertSummary>;
+  deleteParkingAlert?: (id: string) => Promise<void>;
 }
 
 function defaultStorage(): PreferencesStorage | undefined {
@@ -167,6 +185,16 @@ function alertInputValues(input: ArrivalAlertInput): { routeId: string; directio
   };
 }
 
+function parkingAlertInputValues(input: ParkingAlertInput): ParkingAlertInput {
+  const parkingId = input.parkingId.trim();
+  const parkingName = input.parkingName.trim();
+  if (!parkingId || parkingId.length > 64 || !parkingName || parkingName.length > 200
+    || !Number.isInteger(input.threshold) || input.threshold < 1 || input.threshold > 100) {
+    throw new PushClientError('invalid-request');
+  }
+  return { parkingId, parkingName, threshold: input.threshold };
+}
+
 function alertFrom(value: unknown): ArrivalAlertSummary | undefined {
   const candidate = parseJsonObject(value);
   if (!candidate) {
@@ -202,6 +230,31 @@ function alertFrom(value: unknown): ArrivalAlertSummary | undefined {
   if (typeof candidate.expiresAt === 'string') {
     normalized.expiresAt = candidate.expiresAt;
   }
+  return normalized;
+}
+
+function parkingAlertFrom(value: unknown): ParkingAlertSummary | undefined {
+  const candidate = parseJsonObject(value);
+  if (!candidate) return undefined;
+  const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+  const parkingId = typeof candidate.parkingId === 'string'
+    ? candidate.parkingId.trim()
+    : typeof candidate.facilityId === 'string'
+      ? candidate.facilityId.trim()
+      : '';
+  const parkingName = typeof candidate.parkingName === 'string'
+    ? candidate.parkingName.trim()
+    : typeof candidate.name === 'string'
+      ? candidate.name.trim()
+      : '';
+  const threshold = candidate.threshold;
+  if (!id || !parkingId || !parkingName || typeof threshold !== 'number'
+    || !Number.isInteger(threshold) || threshold < 1 || threshold > 100) {
+    return undefined;
+  }
+  const normalized: ParkingAlertSummary = { id, parkingId, parkingName, threshold };
+  if (typeof candidate.createdAt === 'string') normalized.createdAt = candidate.createdAt;
+  if (typeof candidate.expiresAt === 'string') normalized.expiresAt = candidate.expiresAt;
   return normalized;
 }
 
@@ -482,6 +535,20 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
       }
       return alerts.filter((alert): alert is ArrivalAlertSummary => alert !== undefined);
     },
+    listParkingAlerts: async () => {
+      const identity = readIdentity();
+      if (!identity) return [];
+      const payload = await authenticatedRequestJson('/push/parking-alerts', {
+        method: 'GET',
+        headers: authorizationHeaders(identity),
+      });
+      const objectPayload = parseJsonObject(payload);
+      const values = Array.isArray(payload) ? payload : objectPayload?.alerts;
+      if (!Array.isArray(values)) throw new PushClientError('invalid-response');
+      const alerts = values.map(parkingAlertFrom);
+      if (alerts.some((alert) => alert === undefined)) throw new PushClientError('invalid-response');
+      return alerts.filter((alert): alert is ParkingAlertSummary => alert !== undefined);
+    },
     createAlert: async (input) => {
       const values = alertInputValues(input);
       const support = getSupport();
@@ -519,6 +586,33 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
       }
       return alert;
     },
+    createParkingAlert: async (input) => {
+      const values = parkingAlertInputValues(input);
+      const support = getSupport();
+      if (!support.supported) throw new PushClientError('unsupported');
+      const notification = notificationApi(options);
+      if (!notification) throw new PushClientError('unsupported');
+      if (notification.permission === 'denied') throw new PushClientError('permission-denied');
+      if (notification.permission === 'default') {
+        let permission: NotificationPermission;
+        try {
+          permission = await notification.requestPermission();
+        } catch {
+          throw new PushClientError('permission-denied');
+        }
+        if (permission !== 'granted') throw new PushClientError('permission-denied');
+      }
+      const identity = await ensureIdentity();
+      const payload = await authenticatedRequestJson('/push/parking-alerts', {
+        method: 'POST',
+        headers: { ...authorizationHeaders(identity), 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const objectPayload = parseJsonObject(payload);
+      const alert = parkingAlertFrom(objectPayload?.alert ?? payload);
+      if (!alert) throw new PushClientError('invalid-response');
+      return alert;
+    },
     deleteAlert: async (id) => {
       const normalizedId = id.trim();
       if (!normalizedId) {
@@ -529,6 +623,16 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
         return;
       }
       await authenticatedRequestJson(`/push/alerts/${encodeURIComponent(normalizedId)}`, {
+        method: 'DELETE',
+        headers: authorizationHeaders(identity),
+      });
+    },
+    deleteParkingAlert: async (id) => {
+      const normalizedId = id.trim();
+      if (!normalizedId) throw new PushClientError('invalid-request');
+      const identity = readIdentity();
+      if (!identity) return;
+      await authenticatedRequestJson(`/push/parking-alerts/${encodeURIComponent(normalizedId)}`, {
         method: 'DELETE',
         headers: authorizationHeaders(identity),
       });

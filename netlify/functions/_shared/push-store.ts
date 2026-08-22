@@ -11,7 +11,9 @@ import { RealtimeRateLimiter } from '../../../server/routes/realtime';
 import type { CatalogRepository } from '../../../src/data/catalog-repository';
 import {
   PushReservationSchema,
+  StoredParkingAlertSchema,
   StoredAlertSchema,
+  type StoredParkingAlert,
   StoredSubscriptionSchema,
   type PushReservation,
   type StoredAlert,
@@ -21,11 +23,14 @@ import {
 export type {
   ArrivalAlertInput,
   ArrivalAlertSummary,
+  ParkingAlertInput,
+  ParkingAlertSummary,
   PushIdentity,
   PushReservation,
   PushSubscriptionInput,
   StoredAlert,
   StoredSubscription,
+  StoredParkingAlert,
 } from './push-contract';
 
 export interface JsonBlobStore<T extends { id: string }> {
@@ -84,6 +89,9 @@ export interface PushStores {
   subscriptions: JsonBlobStore<StoredSubscription>;
   alerts: JsonBlobStore<StoredAlert>;
   reservations: JsonBlobStore<PushReservation>;
+  /** Separate namespace for one-shot parking alerts; bus alert storage stays untouched. */
+  parkingAlerts?: JsonBlobStore<StoredParkingAlert>;
+  parkingReservations?: JsonBlobStore<PushReservation>;
 }
 
 export interface PushApiDependencies {
@@ -124,6 +132,23 @@ export function alertStorageKey(subscriptionId: string, alertId: string): string
   return `${alertStoragePrefix(subscriptionId)}${alertId}`;
 }
 
+export function parkingAlertStoragePrefix(subscriptionId: string): string {
+  return `${subscriptionId}/`;
+}
+
+export function parkingAlertStorageKey(subscriptionId: string, alertId: string): string {
+  return `${parkingAlertStoragePrefix(subscriptionId)}${alertId}`;
+}
+
+/** Resolve the independently named parking-alert blob store. The fallback only supports old tests. */
+export function parkingAlertsStore(stores: PushStores): JsonBlobStore<StoredParkingAlert> {
+  return stores.parkingAlerts ?? stores.alerts as unknown as JsonBlobStore<StoredParkingAlert>;
+}
+
+export function parkingReservationsStore(stores: PushStores): JsonBlobStore<PushReservation> {
+  return stores.parkingReservations ?? stores.reservations;
+}
+
 export function getPushRateLimiter(): RealtimeRateLimiter {
   if (!defaultRateLimiter) {
     defaultRateLimiter = new RealtimeRateLimiter({
@@ -152,6 +177,14 @@ export function getPushStores(): PushStores {
       })),
       reservations: new NetlifyJsonBlobStore<PushReservation>(getStore({
         name: 'arrival-alert-reservations',
+        consistency: 'strong',
+      })),
+      parkingAlerts: new NetlifyJsonBlobStore<StoredParkingAlert>(getStore({
+        name: 'parking-alerts',
+        consistency: 'strong',
+      })),
+      parkingReservations: new NetlifyJsonBlobStore<PushReservation>(getStore({
+        name: 'parking-alert-reservations',
         consistency: 'strong',
       })),
     };
@@ -273,6 +306,15 @@ export async function cleanupStaleSubscriptions(
       activeSubscriptionIds.add(parsed.data.subscriptionId);
     }
   }
+  if (stores.parkingAlerts) {
+    for (const key of await stores.parkingAlerts.list()) {
+      const value = await stores.parkingAlerts.get(key);
+      const parsed = value === undefined ? undefined : StoredParkingAlertSchema.safeParse(value);
+      if (parsed?.success && Date.parse(parsed.data.expiresAt) > nowMilliseconds) {
+        activeSubscriptionIds.add(parsed.data.subscriptionId);
+      }
+    }
+  }
 
   let deleted = 0;
   const keys = (await stores.subscriptions.list()).slice(0, maxRecords);
@@ -359,5 +401,18 @@ export async function deleteSubscriptionAndAlerts(
     if (alert?.subscriptionId === subscriptionId) {
       await stores.alerts.delete(key);
     }
+  }
+  const parkingStore = stores.parkingAlerts;
+  if (parkingStore) {
+    for (const key of await parkingStore.list(parkingAlertStoragePrefix(subscriptionId))) {
+      const alert = await parkingStore.get(key);
+      const parsed = alert === undefined ? undefined : StoredParkingAlertSchema.safeParse(alert);
+      if (parsed?.success && parsed.data.subscriptionId === subscriptionId) {
+        await parkingStore.delete(key);
+      }
+    }
+  }
+  if (stores.parkingReservations) {
+    await stores.parkingReservations.delete(subscriptionId);
   }
 }

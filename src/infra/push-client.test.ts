@@ -110,6 +110,39 @@ describe('browser push client', () => {
     expect(fetcher).toHaveBeenNthCalledWith(3, '/api/push/alerts/alert-2', expect.objectContaining({ method: 'DELETE', headers: expect.objectContaining({ Authorization: 'Bearer token-1' }) }));
   });
 
+  it('uses the same stored push identity for parking alert list/create/delete operations', async () => {
+    const storage = new MemoryStorage();
+    storage.setItem(PUSH_IDENTITY_STORAGE_KEY, JSON.stringify(identity()));
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ alerts: [{ id: 'parking-alert-1', parkingId: '42', parkingName: '甲停車場', threshold: 10 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'parking-alert-2', parkingId: '43', parkingName: '乙停車場', threshold: 7 }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = createPushClient({ fetch: fetcher, storage, notification: notification('granted'), pushManager: pushManager(vi.fn()), serviceWorker: { ready: Promise.resolve(registration(pushManager(vi.fn()))) } });
+
+    await expect(client.listParkingAlerts?.()).resolves.toEqual([{ id: 'parking-alert-1', parkingId: '42', parkingName: '甲停車場', threshold: 10 }]);
+    await expect(client.createParkingAlert?.({ parkingId: '43', parkingName: '乙停車場', threshold: 7 })).resolves.toMatchObject({ parkingId: '43' });
+    await client.deleteParkingAlert?.('parking-alert-2');
+
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/push/parking-alerts', expect.objectContaining({ method: 'GET', headers: expect.objectContaining({ Authorization: 'Bearer token-1' }) }));
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/push/parking-alerts', expect.objectContaining({ method: 'POST', body: JSON.stringify({ parkingId: '43', parkingName: '乙停車場', threshold: 7 }) }));
+    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/push/parking-alerts/parking-alert-2', expect.objectContaining({ method: 'DELETE', headers: expect.objectContaining({ Authorization: 'Bearer token-1' }) }));
+  });
+
+  it('does not create a parking alert when permission is denied', async () => {
+    const fetcher = vi.fn();
+    const client = createPushClient({
+      fetch: fetcher,
+      serviceWorker: { ready: Promise.resolve(registration(pushManager(vi.fn()))) },
+      pushManager: pushManager(vi.fn()),
+      notification: notification('denied'),
+      storage: new MemoryStorage(),
+    });
+
+    await expect(client.createParkingAlert?.({ parkingId: '42', parkingName: '甲停車場', threshold: 10 }))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it.each([404, 410])('keeps a valid identity after an alert-level %s and can still manage another alert', async (status) => {
     const storage = new MemoryStorage();
     storage.setItem(PUSH_IDENTITY_STORAGE_KEY, JSON.stringify(identity()));

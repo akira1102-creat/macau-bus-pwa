@@ -592,6 +592,19 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
 .parking-detail-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 50px; border-radius: 12px; font-weight: 700; }
 .parking-primary-action { border: 0; background: var(--color-jade); color: #fff; }
 .parking-secondary-action { border: 1px solid var(--color-jade); background: var(--color-jade-soft); color: var(--color-jade-dark); }
+.parking-alert-backdrop { position: fixed; inset: 0; z-index: 70; display: flex; align-items: flex-end; justify-content: center; padding: 16px; background: rgba(23, 28, 36, 0.42); }
+.parking-alert-sheet { width: min(100%, 560px); max-height: min(90dvh, 620px); overflow: auto; padding: 22px 20px calc(24px + env(safe-area-inset-bottom)); border: 1px solid var(--color-divider); border-radius: 22px 22px 12px 12px; background: var(--color-surface); box-shadow: 0 14px 46px var(--color-shadow); }
+.parking-alert-sheet-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.parking-alert-sheet-heading h2 { margin: 0; font-size: 1.35rem; }
+.parking-alert-sheet .eyebrow { margin: 0 0 4px; color: var(--color-jade-dark); font-size: 0.88rem; font-weight: 700; }
+.parking-alert-support { margin: 14px 0; color: var(--color-muted); }
+.parking-alert-threshold { display: grid; grid-template-columns: minmax(0, 1fr) 100px; align-items: center; gap: 5px 12px; margin: 18px 0; }
+.parking-alert-threshold span { font-weight: 700; }
+.parking-alert-threshold small { grid-column: 1 / -1; color: var(--color-muted); }
+.parking-alert-threshold input { width: 100%; min-height: 44px; padding: 4px 9px; border: 1px solid var(--color-divider); border-radius: 10px; color: var(--color-text); background: var(--color-surface); }
+.parking-alert-sheet > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 50px; border-radius: 12px; font-weight: 700; }
+.parking-alert-success { margin: 14px 0 0; color: var(--color-jade-dark); }
+.parking-alert-error { margin: 14px 0 0; color: var(--color-danger); }
 .parking-source-note, .parking-privacy-note { margin: 16px 0 0; color: var(--color-muted); font-size: 0.9rem; }
 .parking-privacy-note { margin-top: 5px; }
 .parking-threshold-control { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
