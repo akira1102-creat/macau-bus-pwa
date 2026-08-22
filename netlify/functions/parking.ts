@@ -15,10 +15,11 @@ export default async function parkingHandler(request: Request, context: Context)
     return parkingJsonResponse(request, snapshot);
   } catch (error) {
     if (error instanceof ParkingAdmissionError) {
+      const timeout = error.failureCode === 'timeout';
       return parkingJsonResponse(
         request,
-        { error: error.code },
-        429,
+        { error: timeout ? 'upstream-timeout' : 'upstream-error' },
+        timeout ? 504 : 502,
         { 'Retry-After': String(error.retryAfterSeconds) },
       );
     }

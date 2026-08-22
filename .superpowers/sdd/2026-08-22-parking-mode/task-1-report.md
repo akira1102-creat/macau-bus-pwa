@@ -100,3 +100,36 @@
 
 - Netlify function instance/module memory 內 admission state 只提供 per-instance protection；多 instance/global quota 仍需 deployment-level monitoring 或 platform control。
 - 本輪未做 live deployment verification，且沒有 push；live DSAT behavior/latency 仍需後續部署後觀察。
+
+## Fix round 2
+
+### covering test files
+
+- `tests/netlify/parking.test.ts`：同一 runtime instance 首次 network failure 後 cooldown retry 保持 safe 502；首次 timeout 後保持 safe 504；兩者都不重打 DSAT。
+- `server/parking/runtime.test.ts`：既有 admission coalescing/cooldown regressions。
+- `server/routes/parking.test.ts`：Fastify parking contract focused rerun。
+
+### RED commands/evidence
+
+- `npx vitest run tests/netlify/parking.test.ts -t "keeps the first upstream"`：`2 tests failed`；cooldown retry body 由預期 `{ error: 'upstream-error' }`/`{ error: 'upstream-timeout' }` 變成 `{ error: 'rate-limit-exceeded' }`（原為 429）。
+
+### GREEN commands/evidence
+
+- `npx vitest run tests/netlify/parking.test.ts -t "keeps the first upstream"`：`1 file passed, 2 tests passed`；network 首次 502/cooldown retry 502，timeout 首次 504/cooldown retry 504，兩組 fetcher 均只呼叫 1 次。
+- `npx vitest run server/parking/runtime.test.ts tests/netlify/parking.test.ts server/routes/parking.test.ts`：`3 files passed, 12 tests passed`。
+- `npm run typecheck`：exit 0；`npm run lint`：exit 0；`git diff --check`：exit 0。
+
+### changes/self-review
+
+- `ParkingRefreshAdmission` 記錄最近一次 upstream failure kind（generic/timeout）；無 cached success 且 cooldown 內拒絕新 refresh 時，將 failure kind 帶入 admission error。
+- Netlify handler cooldown retry 仍加 `Retry-After`，但按首次 upstream failure 回傳同一 safe contract：generic `502/{error: upstream-error}`、timeout `504/{error: upstream-timeout}`，不再回 429/body `rate-limit-exceeded`。
+- 未保存或回傳 raw upstream error；只保留 timeout/generic 分類；未修改 UI、push、版本、plan/spec；未 push。
+
+### commit
+
+`修正泊車 cooldown 錯誤狀態`
+
+### concerns
+
+- Admission failure kind 只保存於 function instance memory；跨 instance 仍需 platform-level protection/monitoring。
+- 本輪未做 live deployment verification，且沒有 push。

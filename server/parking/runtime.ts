@@ -5,20 +5,24 @@ import {
   PARKING_CACHE_TTL_MS,
   PARKING_MAX_RESPONSE_BYTES,
   PARKING_TIMEOUT_MS,
+  ParkingClientError,
   type ParkingClient,
 } from './client';
 import type { ParkingSnapshot } from '../../shared/parking-contract';
 
 export const PARKING_REFRESH_COOLDOWN_MS = 5_000;
+type ParkingAdmissionFailureCode = 'error' | 'timeout';
 
 export class ParkingAdmissionError extends Error {
   readonly code = 'rate-limit-exceeded' as const;
   readonly retryAfterSeconds: number;
+  readonly failureCode: ParkingAdmissionFailureCode;
 
-  constructor(retryAfterMs: number) {
+  constructor(retryAfterMs: number, failureCode: ParkingAdmissionFailureCode = 'error') {
     super('Parking refresh admission limit exceeded');
     this.name = 'ParkingAdmissionError';
     this.retryAfterSeconds = Math.max(1, Math.ceil(retryAfterMs / 1_000));
+    this.failureCode = failureCode;
   }
 }
 
@@ -33,6 +37,7 @@ export class ParkingRefreshAdmission {
   private nextAllowedAt = 0;
   private pending: Promise<ParkingSnapshot> | undefined;
   private lastSnapshot: ParkingSnapshot | undefined;
+  private lastFailureCode: ParkingAdmissionFailureCode = 'error';
 
   constructor(options: ParkingRefreshAdmissionOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -49,16 +54,23 @@ export class ParkingRefreshAdmission {
       if (this.lastSnapshot) {
         return Promise.resolve({ ...this.lastSnapshot, stale: true });
       }
-      return Promise.reject(new ParkingAdmissionError(this.nextAllowedAt - currentTime));
+      return Promise.reject(new ParkingAdmissionError(this.nextAllowedAt - currentTime, this.lastFailureCode));
     }
 
     this.nextAllowedAt = currentTime + this.cooldownMs;
     const pending = Promise.resolve()
       .then(loader)
       .then((snapshot) => {
+        this.lastFailureCode = 'error';
         if (!snapshot.stale) this.lastSnapshot = snapshot;
         else if (!this.lastSnapshot) this.lastSnapshot = snapshot;
         return snapshot;
+      })
+      .catch((error: unknown) => {
+        this.lastFailureCode = error instanceof ParkingClientError && error.code === 'timeout'
+          ? 'timeout'
+          : 'error';
+        throw error;
       })
       .finally(() => {
         if (this.pending === pending) this.pending = undefined;

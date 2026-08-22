@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import parkingHandler from '../../netlify/functions/parking';
+import { ParkingClientError } from '../../server/parking/client';
 import { resetParkingRuntimeForTests } from '../../server/parking/runtime';
 
 const allowedOrigin = 'https://akira1102-creat.github.io';
@@ -105,5 +106,33 @@ describe('Netlify GET /api/parking', () => {
     expect(JSON.stringify(body)).not.toContain('private synthetic upstream error');
     expect(JSON.stringify(body)).not.toContain('<html');
     expect(logSpy).toHaveBeenCalledWith('{"event":"dsat-parking-failed","code":"network"}');
+  });
+
+  it('keeps the first upstream 502 contract during cooldown without retrying DSAT', async () => {
+    const fetcher = vi.fn(async () => { throw new Error('<html>private synthetic upstream error</html>'); });
+    vi.stubGlobal('fetch', fetcher);
+
+    const first = await parkingHandler(request(), {} as ParkingContext);
+    const second = await parkingHandler(request(), {} as ParkingContext);
+
+    expect(first.status).toBe(502);
+    expect(await second.json()).toEqual({ error: 'upstream-error' });
+    expect(second.status).toBe(502);
+    expect(second.headers.get('retry-after')).toBe('5');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the first upstream 504 contract during cooldown for a timeout', async () => {
+    const fetcher = vi.fn(async () => { throw new ParkingClientError('timeout'); });
+    vi.stubGlobal('fetch', fetcher);
+
+    const first = await parkingHandler(request(), {} as ParkingContext);
+    const second = await parkingHandler(request(), {} as ParkingContext);
+
+    expect(first.status).toBe(504);
+    expect(await second.json()).toEqual({ error: 'upstream-timeout' });
+    expect(second.status).toBe(504);
+    expect(second.headers.get('retry-after')).toBe('5');
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
