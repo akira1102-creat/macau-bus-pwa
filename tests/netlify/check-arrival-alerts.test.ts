@@ -6,10 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCatalogRepository } from '../../src/data/catalog-repository';
 import { TransitCatalogSchema } from '../../shared/transit-contract';
 import {
+  createArrivalObservationFetcher,
   runArrivalAlertCheck,
   config as checkerConfig,
   type ArrivalAlertCheckDependencies,
 } from '../../netlify/functions/check-arrival-alerts';
+import { RealtimeCache } from '../../server/cache/realtime-cache';
+import type { RealtimeRouteResponse } from '../../shared/transit-contract';
 import type {
   JsonBlobStore,
   PushReservation,
@@ -207,6 +210,53 @@ describe('minute arrival alert checker', () => {
     await runArrivalAlertCheck(ambiguous);
     expect(ambiguousFailure).toHaveBeenCalledTimes(2);
     expect(await alerts.get(alertKey('alert-ambiguous'))).toBeUndefined();
+  });
+
+  it('retains a whole route group when an injected realtime response is stale', async () => {
+    const dependencies = setup(vi.fn(async () => ({
+      route: '1',
+      direction: 0 as const,
+      updatedAt: '2026-08-21T23:59:47.000Z',
+      ageSeconds: 13,
+      stale: true,
+      source: 'DSAT observation' as const,
+      buses: [
+        { plate: 'STALE-001', stationCode: 'M2', speedKph: 8, status: null, passengerFlow: null, busType: null, facilities: null },
+      ],
+    })));
+    await alerts.set(alertKey('alert-stale-route'), alert('alert-stale-route', 'M2', 1, 1));
+
+    const result = await runArrivalAlertCheck(dependencies);
+
+    expect(result.sent).toBe(0);
+    expect(result.retained).toBe(1);
+    expect(sent).toHaveLength(0);
+    expect(await alerts.get(alertKey('alert-stale-route'))).toMatchObject({ id: 'alert-stale-route', routeId: '1' });
+    expect(await alerts.get(alertKey('alert-stale-route'))).not.toHaveProperty('claimId');
+  });
+
+  it('preserves stale cache metadata when an upstream refresh fails', async () => {
+    let clock = 0;
+    const upstream = vi.fn()
+      .mockResolvedValueOnce({
+        applicationHeader: '000' as const,
+        buses: [
+          { plate: 'CACHED-001', stationCode: 'M2', speedKph: 8, status: null, passengerFlow: null, busType: null, facilities: null },
+        ],
+        raw: { header: '000', data: { routeInfo: [] } },
+      })
+      .mockRejectedValueOnce(new Error('temporary upstream failure'));
+    const fetchRoute = createArrivalObservationFetcher({
+      client: { fetchRoute: upstream },
+      cache: new RealtimeCache<RealtimeRouteResponse>({ now: () => clock, freshTtlMs: 12_000 }),
+    });
+
+    const fresh = await fetchRoute('1', 0);
+    clock = 13_000;
+    const stale = await fetchRoute('1', 0);
+
+    expect(fresh).toMatchObject({ stale: false, ageSeconds: 0 });
+    expect(stale).toMatchObject({ stale: true, ageSeconds: 13, buses: [{ plate: 'CACHED-001' }] });
   });
 
   it('deletes expired alerts before fetching observations', async () => {

@@ -678,6 +678,51 @@ describe('push subscription and alert CRUD', () => {
     expect(await alerts.get(storageKey)).toBeUndefined();
   });
 
+  it('keeps DELETE busy after the old 15-second lease while a bus push is still in flight', async () => {
+    const subscriptionsHandler = createPushSubscriptionsHandler(dependencies);
+    const alertsHandler = createPushAlertsHandler(dependencies);
+    const subscriptionResponse = await subscriptionsHandler(request('/api/push/subscriptions', 'POST', {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/long-bus-delivery',
+      keys: { p256dh: 'public-key', auth: 'auth-secret' },
+    }), {} as PushContext);
+    const identity = await subscriptionResponse.json() as { subscriptionId: string; alertToken: string };
+    const created = await alertsHandler(request('/api/push/alerts', 'POST', {
+      routeId: '1', direction: 0, targetStopId: 'M2', targetStopIndex: 1, threshold: 1,
+    }, auth(identity)), context());
+    const summary = await created.json() as { id: string };
+    let enteredResolve!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+    let releaseResolve!: () => void;
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    const sender = vi.fn(async () => {
+      enteredResolve();
+      await release;
+    });
+    const checker = runArrivalAlertCheck({
+      stores: dependencies.stores,
+      catalog,
+      now: () => new Date(now),
+      fetchRoute: vi.fn(async () => ([
+        { plate: 'PLATE-001', stationCode: 'M2', speedKph: 8, status: null, passengerFlow: null, busType: null, facilities: null },
+      ])),
+      sendNotification: sender,
+    });
+    await entered;
+    now = new Date('2026-08-22T00:00:16.000Z');
+
+    const deleting = await alertsHandler(
+      request(`/api/push/alerts/${summary.id}`, 'DELETE', undefined, auth(identity)),
+      context(summary.id),
+    );
+
+    expect(deleting.status).toBe(409);
+    expect(await alerts.get(`${identity.subscriptionId}/${summary.id}`)).toMatchObject({ state: 'claimed' });
+    releaseResolve();
+    await checker;
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(await alerts.get(`${identity.subscriptionId}/${summary.id}`)).toBeUndefined();
+  });
+
   it('does not exceed five active alerts when six creates race concurrently', async () => {
     const subscriptionsHandler = createPushSubscriptionsHandler(dependencies);
     const alertsHandler = createPushAlertsHandler(dependencies);

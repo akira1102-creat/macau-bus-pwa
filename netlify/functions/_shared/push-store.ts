@@ -124,6 +124,15 @@ export const MAX_LEGACY_SUBSCRIPTION_SCAN = 100;
 export const GLOBAL_SUBSCRIPTION_ADMISSION_KEY = '__global-subscription-admission__';
 export const GLOBAL_SUBSCRIPTION_ADMISSION_TTL_MS = 5 * 60 * 1_000;
 export const PUSH_MUTATION_RESERVATION_TTL_MS = 15_000;
+/**
+ * A checker keeps this crash lease for the whole awaited provider send. It is
+ * longer than the serverless execution ceiling, while the provider request
+ * also has its own aborting socket timeout. Never unlock a still-running send
+ * with Promise.race: API mutations must stay 409 until send settles, or until
+ * a crashed function's lease can safely expire.
+ */
+export const PUSH_DELIVERY_CRITICAL_SECTION_TTL_MS = 30 * 60 * 1_000;
+export const PUSH_PROVIDER_SOCKET_TIMEOUT_MS = 20_000;
 
 export interface PushReservationLease {
   owner: string;
@@ -174,13 +183,14 @@ export async function acquirePushMutationReservation(
   subscriptionId: string,
   now: Date,
   randomizer: (size: number) => Buffer = randomBytes,
+  ttlMs = PUSH_MUTATION_RESERVATION_TTL_MS,
 ): Promise<PushReservationLease | undefined> {
   const owner = makeRandomId(randomizer);
   const next: PushReservation = {
     id: subscriptionId,
     subscriptionId,
     owner,
-    expiresAt: new Date(now.getTime() + PUSH_MUTATION_RESERVATION_TTL_MS).toISOString(),
+    expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
   };
   const existing = await store.getWithMetadata(subscriptionId);
   if (existing === undefined) {

@@ -394,4 +394,53 @@ describe('parking push alert API', () => {
     await checker();
     expect(sender).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps replacement busy after the old 15-second lease while a parking push is still in flight', async () => {
+    const subscriptionsHandler = createPushSubscriptionsHandler(dependencies);
+    const response = await subscriptionsHandler(request('/api/push/subscriptions', 'POST', {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/long-parking-delivery',
+      keys: { p256dh: 'public-key', auth: 'auth-secret' },
+    }), {} as PushContext);
+    const identity = await response.json() as { subscriptionId: string; alertToken: string };
+    const handler = createParkingPushAlertsHandler(dependencies);
+    const headers = auth(identity);
+    const created = await handler(request('/api/push/parking-alerts', 'POST', {
+      parkingId: '42', parkingName: '甲停車場', threshold: 10,
+    }, headers), context());
+    const summary = await created.json() as { id: string };
+    let enteredResolve!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+    let releaseResolve!: () => void;
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    const sender = vi.fn(async () => {
+      enteredResolve();
+      await release;
+    });
+    const checker = runParkingAlertCheck({
+      stores: dependencies.stores,
+      now: () => new Date(now),
+      fetchParking: vi.fn(async () => ({
+        updatedAt: now.toISOString(), stale: false,
+        facilities: [{
+          id: '42', name: '甲停車場', location: '澳門', entrance: null, latitude: null, longitude: null,
+          spaces: { car: 1, motorcycle: null, electricCar: null, electricMotorcycle: null, accessible: null },
+          updatedAt: now.toISOString(), suspended: false,
+        }],
+      })),
+      sendNotification: sender,
+    });
+    await entered;
+    now = new Date('2026-08-22T00:00:16.000Z');
+
+    const replacing = await handler(request('/api/push/parking-alerts', 'POST', {
+      parkingId: '42', parkingName: '甲停車場', threshold: 7,
+    }, headers), context());
+
+    expect(replacing.status).toBe(409);
+    expect(await alerts.get(`${identity.subscriptionId}/${summary.id}`)).toMatchObject({ state: 'claimed', threshold: 10 });
+    releaseResolve();
+    await checker;
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(await alerts.get(`${identity.subscriptionId}/${summary.id}`)).toBeUndefined();
+  });
 });

@@ -12,7 +12,7 @@ import {
 } from '../../shared/transit-contract';
 import { getCatalogRepository } from './_shared/catalog';
 import { readNetlifyEnv } from './_shared/env';
-import { getNetlifyRuntime } from './_shared/runtime';
+import { getNetlifyRuntime, type NetlifyRuntime } from './_shared/runtime';
 import {
   StoredAlertSchema,
   type StoredAlert,
@@ -23,6 +23,8 @@ import {
   deleteSubscriptionAndAlerts,
   getDefaultPushDependencies,
   makeRandomId,
+  PUSH_DELIVERY_CRITICAL_SECTION_TTL_MS,
+  PUSH_PROVIDER_SOCKET_TIMEOUT_MS,
   releasePushMutationReservation,
   type PushStores,
   type PushReservationLease,
@@ -72,7 +74,6 @@ interface AlertGroup {
   alerts: PendingAlert[];
 }
 
-const CLAIM_TTL_MS = 15_000;
 const DEFAULT_PUBLIC_APP_URL = 'https://akira1102-creat.github.io/macau-bus-pwa/';
 
 function currentDate(dependencies: Pick<ArrivalAlertCheckDependencies, 'now'>): Date {
@@ -85,8 +86,8 @@ function pushStatus(error: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
-function asBuses(value: RealtimeBus[] | RealtimeRouteResponse): RealtimeBus[] {
-  return Array.isArray(value) ? value : value.buses;
+function routeObservation(value: RealtimeBus[] | RealtimeRouteResponse): { buses: RealtimeBus[]; stale: boolean } {
+  return Array.isArray(value) ? { buses: value, stale: false } : { buses: value.buses, stale: value.stale };
 }
 
 function validatedAppUrl(value: string | undefined): string {
@@ -134,7 +135,7 @@ async function claimAlert(
     ...parsed.data,
     state: 'claimed',
     claimId,
-    claimExpiresAt: new Date(now.getTime() + CLAIM_TTL_MS).toISOString(),
+    claimExpiresAt: new Date(now.getTime() + PUSH_DELIVERY_CRITICAL_SECTION_TTL_MS).toISOString(),
   });
   return await dependencies.stores.alerts.setIfMatch(alertId, claimed, current.etag)
     ? { alert: claimed, claimId }
@@ -234,8 +235,9 @@ function candidateForAlert(
   return candidates.sort((left, right) => left.remainingStops - right.remainingStops || left.plate.localeCompare(right.plate))[0];
 }
 
-function defaultFetchRoute(): ArrivalObservationFetcher {
-  const runtime = getNetlifyRuntime();
+export function createArrivalObservationFetcher(
+  runtime: Pick<NetlifyRuntime, 'client' | 'cache'> = getNetlifyRuntime(),
+): ArrivalObservationFetcher {
   return async (routeId, direction) => {
     const result = await runtime.cache.get(`${routeId}|${direction}`, async () => {
       const upstream = await runtime.client.fetchRoute(routeId, direction);
@@ -249,7 +251,11 @@ function defaultFetchRoute(): ArrivalObservationFetcher {
         buses: upstream.buses,
       });
     });
-    return result.value;
+    return RealtimeRouteResponseSchema.parse({
+      ...result.value,
+      ageSeconds: result.ageSeconds,
+      stale: result.stale,
+    });
   };
 }
 
@@ -266,6 +272,7 @@ function defaultSender(): ArrivalNotificationSender {
       keys: subscription.keys,
     }, payload, {
       vapidDetails: { subject, publicKey, privateKey },
+      timeout: PUSH_PROVIDER_SOCKET_TIMEOUT_MS,
       TTL: 300,
       urgency: 'high',
     });
@@ -277,7 +284,7 @@ async function defaultDependencies(): Promise<ArrivalAlertCheckDependencies> {
   return {
     stores: base.stores,
     getCatalog: getCatalogRepository,
-    fetchRoute: defaultFetchRoute(),
+    fetchRoute: createArrivalObservationFetcher(),
     sendNotification: defaultSender(),
   };
 }
@@ -379,14 +386,19 @@ export async function runArrivalAlertCheck(
       result.retained += group.alerts.length;
       continue;
     }
-    let buses: RealtimeBus[];
+    let observation: ReturnType<typeof routeObservation>;
     try {
-      buses = asBuses(await dependencies.fetchRoute(group.routeId, group.direction));
+      observation = routeObservation(await dependencies.fetchRoute(group.routeId, group.direction));
     } catch {
       result.errors += 1;
       result.retained += group.alerts.length;
       continue;
     }
+    if (observation.stale) {
+      result.retained += group.alerts.length;
+      continue;
+    }
+    const buses = observation.buses;
 
     for (const item of group.alerts) {
       if (deadSubscriptions.has(item.subscription.id)) continue;
@@ -410,6 +422,7 @@ export async function runArrivalAlertCheck(
           item.subscription.id,
           now,
           dependencies.randomBytes ?? randomBytes,
+          PUSH_DELIVERY_CRITICAL_SECTION_TTL_MS,
         );
       } catch {
         result.errors += 1;

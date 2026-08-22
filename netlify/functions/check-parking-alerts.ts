@@ -15,6 +15,8 @@ import {
   makeRandomId,
   parkingAlertsStore,
   parkingReservationsStore,
+  PUSH_DELIVERY_CRITICAL_SECTION_TTL_MS,
+  PUSH_PROVIDER_SOCKET_TIMEOUT_MS,
   releasePushMutationReservation,
   type PushStores,
   type PushReservationLease,
@@ -51,7 +53,6 @@ interface PendingParkingAlert {
   subscription: StoredSubscription;
 }
 
-const CLAIM_TTL_MS = 15_000;
 const MAX_DEAD_SUBSCRIPTION_CLEANUPS_PER_RUN = 25;
 const DEFAULT_PUBLIC_APP_URL = 'https://akira1102-creat.github.io/macau-bus-pwa/';
 
@@ -112,7 +113,7 @@ async function claimAlert(
     ...parsed.data,
     state: 'claimed',
     claimId,
-    claimExpiresAt: new Date(now.getTime() + CLAIM_TTL_MS).toISOString(),
+    claimExpiresAt: new Date(now.getTime() + PUSH_DELIVERY_CRITICAL_SECTION_TTL_MS).toISOString(),
   });
   return await store.setIfMatch(storageKey, claimed, current.etag)
     ? { alert: claimed, claimId }
@@ -315,6 +316,7 @@ function defaultSender(): ParkingNotificationSender {
     if (!publicKey || !privateKey) throw new Error('vapid-unavailable');
     return webpush.sendNotification({ endpoint: subscription.endpoint, keys: subscription.keys }, payload, {
       vapidDetails: { subject, publicKey, privateKey },
+      timeout: PUSH_PROVIDER_SOCKET_TIMEOUT_MS,
       TTL: 300,
       urgency: 'high',
     });
@@ -440,6 +442,7 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
         item.subscription.id,
         now,
         dependencies.randomBytes ?? randomBytes,
+        PUSH_DELIVERY_CRITICAL_SECTION_TTL_MS,
       );
     } catch {
       result.errors += 1;
