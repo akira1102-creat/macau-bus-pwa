@@ -16,8 +16,10 @@ import {
 } from './config';
 import { RealtimeCache } from './cache/realtime-cache';
 import { createDsatClient, type DsatClient } from './dsat/dsat-client';
+import { createParkingClient, type ParkingClient } from './parking/client';
 import { registerDebugRoute } from './routes/debug';
 import { registerHealthRoute } from './routes/health';
+import { registerParkingRoutes } from './routes/parking';
 import { registerRealtimeRoutes, RealtimeRateLimiter } from './routes/realtime';
 
 export interface BuildServerOptions extends ServerConfigOverrides {
@@ -27,6 +29,7 @@ export interface BuildServerOptions extends ServerConfigOverrides {
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
   client?: DsatClient;
+  parkingClient?: ParkingClient;
   cache?: RealtimeCache<RealtimeRouteResponse>;
   logger?: boolean;
   staticDir?: string;
@@ -71,6 +74,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     origin: config.dsatOrigin,
     referer: config.dsatReferer,
     maxResponseBytes: config.dsatMaxResponseBytes,
+    now,
+  });
+  const parkingClient = options.parkingClient ?? createParkingClient({
+    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     now,
   });
   const cache = options.cache ?? new RealtimeCache<RealtimeRouteResponse>({
@@ -118,6 +125,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   registerHealthRoute(app, { catalogReady });
   registerRealtimeRoutes({ app, catalog: catalogRepository, catalogReady, client, cache, now, rateLimiter });
+  registerParkingRoutes({ app, client: parkingClient });
   if (config.environment === 'development' && isDevelopmentEnvironment()) {
     registerDebugRoute({ app, catalog: catalogRepository, catalogReady, client });
   }

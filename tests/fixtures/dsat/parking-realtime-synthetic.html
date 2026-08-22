@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <body>
+    <div id="carpark_data">
+      <table>
+        <tr class="facility-row">
+          <td>
+            <div class="name-and-time">
+              <span class="style7">  合成&nbsp;停車場 &amp; 東  </span><br>
+              2026-08-22 10:00:01
+            </div>
+            <div class="space-value">
+              <img src="./images/carpark_emotor.png" alt="electric motorcycle"> 4
+            </div>
+            <div class="space-value">
+              <img src="./images/carpark_car.png" alt="car"> 12
+            </div>
+            <div class="space-value">
+              <img src="./images/carpark_disabled.png" alt="accessible"> 3
+            </div>
+            <div class="space-value">
+              <img src="./images/carpark_ecar.png" alt="electric car"> 2
+            </div>
+            <div class="space-value">
+              <img src="./images/carpark_motor.png" alt="motorcycle"> 34
+            </div>
+          </td>
+          <td><a href="./carpark_detail.aspx?id=12345"><img src="images/arrow.png" alt="open"></a></td>
+        </tr>
+        <tr class="facility-row" data-suspended="true">
+          <td>
+            <span class="style7"> 暫停場 </span>
+            <span class="status"> 暫停開放 </span>
+            <span class="updated">2026-08-22 10:00:02</span>
+            <div><img src="images/carpark_car.png"> —</div>
+            <div><img src="images/carpark_motor.png"> N/A</div>
+            <div><img src="images/carpark_ecar.png"> -</div>
+            <div><img src="images/carpark_emotor.png"> unknown</div>
+            <div><img src="images/carpark_disabled.png"> 暫停</div>
+          </td>
+          <td><a href="carpark_detail.aspx?lang=zh-tw&amp;id=67890">details</a></td>
+        </tr>
+        <tr class="malformed-row">
+          <td><span class="style7">沒有官方 ID 的資料</span><div><img src="images/carpark_car.png"> 99</div></td>
+        </tr>
+        <tr class="malformed-row">
+          <td><span class="style7">非數字 ID</span></td>
+          <td><a href="carpark_detail.aspx?id=not-a-number">details</a></td>
+        </tr>
+      </table>
+    </div>
+  </body>
+</html>
