@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import arrivalsHandler from '../../netlify/functions/arrivals';
@@ -28,7 +30,7 @@ type ArrivalsContext = Parameters<typeof arrivalsHandler>[1];
 
 function setEnvironment(values: Record<string, string | undefined> = {}): void {
   envValues.clear();
-  envValues.set('CATALOG_PATH', fileURLPath(fixturePath));
+  envValues.set('CATALOG_PATH', fileURLToPath(fixturePath));
   for (const [key, value] of Object.entries(values)) {
     if (value === undefined) {
       envValues.delete(key);
@@ -41,10 +43,6 @@ function setEnvironment(values: Record<string, string | undefined> = {}): void {
       get: (key: string) => envValues.get(key),
     },
   });
-}
-
-function fileURLPath(url: URL): string {
-  return decodeURIComponent(url.pathname).replace(/^\//, '').replace(/^([A-Za-z]):/, '$1:');
 }
 
 function stubUpstream(response = upstreamPayload): ReturnType<typeof vi.fn> {
