@@ -400,8 +400,6 @@ export async function deleteSubscriptionAndAlerts(
   subscriptionId: string,
   stores: PushStores,
 ): Promise<void> {
-  await stores.subscriptions.delete(subscriptionId);
-  await stores.reservations.delete(subscriptionId);
   for (const key of await stores.alerts.list(alertStoragePrefix(subscriptionId))) {
     const alert = await stores.alerts.get(key);
     if (alert?.subscriptionId === subscriptionId) {
@@ -418,7 +416,10 @@ export async function deleteSubscriptionAndAlerts(
       }
     }
   }
+  await stores.reservations.delete(subscriptionId);
   if (stores.parkingReservations) {
     await stores.parkingReservations.delete(subscriptionId);
   }
+  // Delete the identity last so a partial cleanup can be retried by the checker.
+  await stores.subscriptions.delete(subscriptionId);
 }

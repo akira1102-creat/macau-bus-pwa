@@ -139,6 +139,44 @@ async function releaseClaim(
   return store.setIfMatch(storageKey, pending, current.etag);
 }
 
+function pendingIsNewer(candidate: PendingParkingAlert, current: PendingParkingAlert): boolean {
+  const candidateTime = Date.parse(candidate.alert.createdAt);
+  const currentTime = Date.parse(current.alert.createdAt);
+  return candidateTime > currentTime
+    || (candidateTime === currentTime && candidate.alert.id.localeCompare(current.alert.id) > 0);
+}
+
+async function suppressDuplicate(
+  duplicate: PendingParkingAlert,
+  dependencies: ParkingAlertCheckDependencies,
+  now: Date,
+  result: ParkingAlertCheckResult,
+): Promise<void> {
+  const store = parkingAlertsStore(dependencies.stores);
+  try {
+    await store.delete(duplicate.storageKey);
+    result.deleted += 1;
+    return;
+  } catch {
+    // A retained duplicate must not become a second notification on the next run.
+  }
+  try {
+    const current = await store.get(duplicate.storageKey);
+    const parsed = current === undefined ? undefined : StoredParkingAlertSchema.safeParse(current);
+    if (!parsed?.success) return;
+    const delivered = StoredParkingAlertSchema.parse({
+      ...parsed.data,
+      state: 'delivered',
+      deliveredAt: now.toISOString(),
+    });
+    delete delivered.claimId;
+    delete delivered.claimExpiresAt;
+    await store.set(duplicate.storageKey, delivered);
+  } catch {
+    result.errors += 1;
+  }
+}
+
 function defaultFetchParking(): ParkingSnapshotFetcher {
   const runtime = getParkingRuntime();
   return async () => ParkingSnapshotSchema.parse(await runtime.fetchSnapshot());
@@ -168,6 +206,7 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
   const now = currentDate(dependencies);
   const store = parkingAlertsStore(dependencies.stores);
   const pending: PendingParkingAlert[] = [];
+  const claimedFacilities = new Set<string>();
   const subscriptionCache = new Map<string, StoredSubscription | undefined>();
 
   for (const storageKey of await store.list()) {
@@ -184,6 +223,9 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
       continue;
     }
     if (parsed.data.state === 'delivered' || parsed.data.state === 'claimed') {
+      if (parsed.data.state === 'claimed') {
+        claimedFacilities.add(`${parsed.data.subscriptionId}\u0000${parsed.data.parkingId}`);
+      }
       result.retained += 1;
       continue;
     }
@@ -201,19 +243,40 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
     pending.push({ storageKey, alert: parsed.data, subscription });
   }
 
-  if (pending.length === 0) return result;
+  const uniquePending = new Map<string, PendingParkingAlert>();
+  for (const candidate of pending) {
+    const facilityKey = `${candidate.subscription.id}\u0000${candidate.alert.parkingId}`;
+    if (claimedFacilities.has(facilityKey)) {
+      result.retained += 1;
+      continue;
+    }
+    const current = uniquePending.get(facilityKey);
+    if (!current) {
+      uniquePending.set(facilityKey, candidate);
+      continue;
+    }
+    if (pendingIsNewer(candidate, current)) {
+      await suppressDuplicate(current, dependencies, now, result);
+      uniquePending.set(facilityKey, candidate);
+    } else {
+      await suppressDuplicate(candidate, dependencies, now, result);
+    }
+  }
+  const deduplicatedPending = [...uniquePending.values()];
+
+  if (deduplicatedPending.length === 0) return result;
 
   let snapshot: ParkingSnapshot;
   try {
     snapshot = ParkingSnapshotSchema.parse(await dependencies.fetchParking());
   } catch {
     result.errors += 1;
-    result.retained += pending.length;
+    result.retained += deduplicatedPending.length;
     return result;
   }
 
   const deadSubscriptions = new Set<string>();
-  for (const item of pending) {
+  for (const item of deduplicatedPending) {
     if (deadSubscriptions.has(item.subscription.id)) continue;
     const facility = facilityForAlert(snapshot.facilities, item.alert);
     const freeSpaces = facility?.suspended ? null : facility?.spaces.car ?? null;
@@ -253,10 +316,15 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
         result.deadSubscriptions += 1;
         try {
           await deleteSubscriptionAndAlerts(item.subscription.id, dependencies.stores);
-          result.deleted += pending.filter((candidate) => candidate.subscription.id === item.subscription.id).length;
+          result.deleted += deduplicatedPending.filter((candidate) => candidate.subscription.id === item.subscription.id).length;
         } catch {
           // A dead provider must not abort the rest of the scheduled run.
           result.errors += 1;
+          try {
+            await releaseClaim(item.storageKey, claimId, dependencies);
+          } catch {
+            result.errors += 1;
+          }
         }
       } else {
         if (isTransientPushFailure(error)) {

@@ -58,7 +58,7 @@ async function readActiveParkingAlerts(
   now: Date,
 ): Promise<ReturnType<typeof ParkingAlertSummarySchema.parse>[]> {
   const store = parkingAlertsStore(dependencies.stores);
-  const active: ReturnType<typeof ParkingAlertSummarySchema.parse>[] = [];
+  const active = new Map<string, { summary: ReturnType<typeof ParkingAlertSummarySchema.parse>; storageKey: string }>();
   for (const key of await store.list(parkingAlertStoragePrefix(subscriptionId))) {
     const value = await store.get(key);
     const parsed = value === undefined ? undefined : StoredParkingAlertSchema.safeParse(value);
@@ -70,9 +70,31 @@ async function readActiveParkingAlerts(
       await store.delete(key);
       continue;
     }
-    active.push(ParkingAlertSummarySchema.parse(parsed.data));
+    if (parsed.data.state === 'delivered') {
+      await store.delete(key);
+      continue;
+    }
+    const summary = ParkingAlertSummarySchema.parse(parsed.data);
+    const current = active.get(summary.parkingId);
+    if (!current) {
+      active.set(summary.parkingId, { summary, storageKey: key });
+      continue;
+    }
+    const currentTime = Date.parse(current.summary.createdAt);
+    const candidateTime = Date.parse(summary.createdAt);
+    const candidateWins = candidateTime > currentTime
+      || (candidateTime === currentTime && summary.id.localeCompare(current.summary.id) > 0);
+    const loserKey = candidateWins ? current.storageKey : key;
+    if (candidateWins) active.set(summary.parkingId, { summary, storageKey: key });
+    try {
+      await store.delete(loserKey);
+    } catch {
+      // Keep the deterministic winner in the response; checker dedupe handles a retained loser.
+    }
   }
-  return active.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+  return [...active.values()]
+    .map(({ summary }) => summary)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
 }
 
 async function acquireReservation(
@@ -216,13 +238,16 @@ export function createParkingPushAlertsHandler(
       if (!existing && active.length >= MAX_ACTIVE_PARKING_ALERTS) {
         return jsonResponse(request, { error: 'active-limit' }, 409, {}, options);
       }
-      const randomizer = dependencies.randomBytes ?? randomBytes;
-      let id = makeRandomId(randomizer);
-      for (let attempt = 0; attempt < 4 && await store.get(parkingAlertStorageKey(subscription.id, id)); attempt += 1) {
+      let id = existing?.id;
+      if (!id) {
+        const randomizer = dependencies.randomBytes ?? randomBytes;
         id = makeRandomId(randomizer);
-      }
-      if (await store.get(parkingAlertStorageKey(subscription.id, id))) {
-        return jsonResponse(request, { error: 'storage-unavailable' }, 503, {}, options);
+        for (let attempt = 0; attempt < 4 && await store.get(parkingAlertStorageKey(subscription.id, id)); attempt += 1) {
+          id = makeRandomId(randomizer);
+        }
+        if (await store.get(parkingAlertStorageKey(subscription.id, id))) {
+          return jsonResponse(request, { error: 'storage-unavailable' }, 503, {}, options);
+        }
       }
       const summary = ParkingAlertSummarySchema.parse({
         id,
@@ -232,18 +257,6 @@ export function createParkingPushAlertsHandler(
       });
       const stored: StoredParkingAlert = { ...summary, subscriptionId: subscription.id, state: 'pending' };
       await store.set(parkingAlertStorageKey(subscription.id, summary.id), stored);
-      if (existing) {
-        try {
-          await store.delete(parkingAlertStorageKey(subscription.id, existing.id));
-        } catch (error) {
-          try {
-            await store.delete(parkingAlertStorageKey(subscription.id, summary.id));
-          } catch {
-            // Best effort rollback; the old record remains the source of truth when possible.
-          }
-          throw error;
-        }
-      }
       return jsonResponse(request, summary, 201, {}, options);
     } catch {
       return jsonResponse(request, { error: 'storage-unavailable' }, 503, {}, options);

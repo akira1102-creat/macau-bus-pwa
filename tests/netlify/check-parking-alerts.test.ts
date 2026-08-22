@@ -161,4 +161,52 @@ describe('minute parking alert checker', () => {
     expect(result.sent).toBe(1);
     expect(await alerts.get(`${secondSubscription.id}/healthy`)).toBeUndefined();
   });
+
+  it('deduplicates duplicate facility records and never sends twice when loser cleanup fails', async () => {
+    const dependencies = setup(vi.fn(async () => snapshot([facility('42', 1)])));
+    await alerts.set(key('dup-old'), alert('dup-old', '42', 2));
+    await alerts.set(key('dup-new'), {
+      ...alert('dup-new', '42', 2),
+      id: 'dup-new',
+      createdAt: '2026-08-22T00:00:01.000Z',
+    });
+    const deleteAlert = alerts.delete.bind(alerts);
+    vi.spyOn(alerts, 'delete').mockImplementation(async (storageKey) => {
+      if (storageKey === key('dup-old')) throw new Error('duplicate cleanup failed');
+      await deleteAlert(storageKey);
+    });
+
+    const first = await runParkingAlertCheck(dependencies);
+    const second = await runParkingAlertCheck(dependencies);
+
+    expect(first.sent).toBe(1);
+    expect(second.sent).toBe(0);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('retries a failed dead-subscription cleanup on the next checker run', async () => {
+    const sender = vi.fn()
+      .mockRejectedValueOnce({ statusCode: 410 })
+      .mockRejectedValueOnce({ statusCode: 410 });
+    const dependencies = setup(vi.fn(async () => snapshot([facility('42', 1)])), sender);
+    await alerts.set(key('dead-retry'), alert('dead-retry', '42', 2));
+    const deleteAlert = alerts.delete.bind(alerts);
+    let cleanupAttempts = 0;
+    vi.spyOn(alerts, 'delete').mockImplementation(async (storageKey) => {
+      if (storageKey === key('dead-retry') && cleanupAttempts++ === 0) {
+        throw new Error('temporary cleanup failure');
+      }
+      await deleteAlert(storageKey);
+    });
+
+    const first = await runParkingAlertCheck(dependencies);
+    expect(first.errors).toBe(1);
+    expect(await alerts.get(key('dead-retry'))).toMatchObject({ state: 'pending' });
+    expect(await subscriptions.get(subscription.id)).toBeDefined();
+
+    const second = await runParkingAlertCheck(dependencies);
+    expect(second.deadSubscriptions).toBe(1);
+    expect(await alerts.get(key('dead-retry'))).toBeUndefined();
+    expect(await subscriptions.get(subscription.id)).toBeUndefined();
+  });
 });

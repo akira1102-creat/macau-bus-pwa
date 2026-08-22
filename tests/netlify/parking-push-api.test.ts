@@ -128,7 +128,7 @@ describe('parking push alert API', () => {
     }, headers), context());
     expect(replacement.status).toBe(201);
     const replacementSummary = await replacement.json() as { id: string; threshold: number };
-    expect(replacementSummary.id).not.toBe(firstSummary.id);
+    expect(replacementSummary.id).toBe(firstSummary.id);
     expect(replacementSummary.threshold).toBe(7);
 
     for (let index = 0; index < 9; index += 1) {
@@ -214,6 +214,30 @@ describe('parking push alert API', () => {
 
     expect(replacement.status).toBe(503);
     expect(await alerts.get(`${identity.subscriptionId}/${firstSummary.id}`)).toMatchObject({ threshold: 10 });
+  });
+
+  it('lists one deterministic latest alert when legacy duplicate records are present', async () => {
+    const subscriptionsHandler = createPushSubscriptionsHandler(dependencies);
+    const response = await subscriptionsHandler(request('/api/push/subscriptions', 'POST', {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/parking-dedup',
+      keys: { p256dh: 'public-key', auth: 'auth-secret' },
+    }), {} as PushContext);
+    const identity = await response.json() as { subscriptionId: string; alertToken: string };
+    await alerts.set(`${identity.subscriptionId}/legacy-old`, {
+      id: 'legacy-old', subscriptionId: identity.subscriptionId, parkingId: '42', parkingName: '甲停車場', threshold: 10,
+      createdAt: '2026-08-22T00:00:00.000Z', expiresAt: '2026-08-22T12:00:00.000Z', state: 'pending',
+    });
+    await alerts.set(`${identity.subscriptionId}/legacy-new`, {
+      id: 'legacy-new', subscriptionId: identity.subscriptionId, parkingId: '42', parkingName: '甲停車場', threshold: 4,
+      createdAt: '2026-08-22T00:00:01.000Z', expiresAt: '2026-08-22T12:00:00.000Z', state: 'pending',
+    });
+
+    const responseList = await createParkingPushAlertsHandler(dependencies)(
+      request('/api/push/parking-alerts', 'GET', undefined, auth(identity)),
+      context(),
+    );
+
+    expect(await responseList.json()).toMatchObject({ alerts: [{ id: 'legacy-new', threshold: 4 }] });
   });
 
   it('serializes DELETE with POST using the same subscription mutation reservation', async () => {
