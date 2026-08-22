@@ -19,9 +19,6 @@ jobs:
       contents: read
       pages: write
     runs-on: ubuntu-latest
-    env:
-      VITE_BASE_PATH: /macau-bus-pwa/
-      VITE_API_BASE_URL: https://macau-bus-api-akr.netlify.app
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -38,8 +35,13 @@ jobs:
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - name: Sync pinned catalog
         run: npm run data:sync
-      - name: Verify and build frontend
-        run: npm run verify
+      - name: Verify frontend
+        run: npm run typecheck && npm run lint && npm test
+      - name: Build frontend
+        run: npm run build
+        env:
+          VITE_BASE_PATH: /macau-bus-pwa/
+          VITE_API_BASE_URL: https://macau-bus-api-akr.netlify.app
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
