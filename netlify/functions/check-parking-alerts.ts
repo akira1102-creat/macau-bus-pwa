@@ -7,13 +7,17 @@ import { ParkingSnapshotSchema, type ParkingFacility, type ParkingSnapshot } fro
 import { getParkingRuntime } from '../../server/parking/runtime';
 import { readNetlifyEnv } from './_shared/env';
 import {
+  acquirePushMutationReservation,
   deadSubscriptionCleanupKey,
   deadSubscriptionCleanupStore,
   deleteSubscriptionAndAlerts,
   getDefaultPushDependencies,
   makeRandomId,
   parkingAlertsStore,
+  parkingReservationsStore,
+  releasePushMutationReservation,
   type PushStores,
+  type PushReservationLease,
   type StoredParkingAlert,
   type StoredSubscription,
 } from './_shared/push-store';
@@ -61,11 +65,6 @@ function pushStatus(error: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
-function isTransientPushFailure(error: unknown): boolean {
-  const status = pushStatus(error);
-  return status === 408 || status === 425 || status === 429 || (status !== undefined && status >= 500);
-}
-
 function validatedAppUrl(value: string | undefined): string {
   if (!value) return DEFAULT_PUBLIC_APP_URL;
   try {
@@ -98,14 +97,16 @@ function notificationBody(alert: StoredParkingAlert, facility: ParkingFacility):
 
 async function claimAlert(
   storageKey: string,
+  expected: StoredParkingAlert,
   dependencies: ParkingAlertCheckDependencies,
   now: Date,
-): Promise<string | undefined> {
+): Promise<{ alert: StoredParkingAlert; claimId: string } | undefined> {
   const store = parkingAlertsStore(dependencies.stores);
   const current = await store.getWithMetadata(storageKey);
   if (!current?.etag) return undefined;
   const parsed = StoredParkingAlertSchema.safeParse(current.value);
-  if (!parsed.success || parsed.data.state === 'delivered' || parsed.data.state === 'claimed') return undefined;
+  if (!parsed.success || parsed.data.state === 'delivered' || parsed.data.state === 'claimed'
+    || !sameParkingAlertVersion(parsed.data, expected)) return undefined;
   const claimId = makeRandomId(dependencies.randomBytes ?? randomBytes);
   const claimed = StoredParkingAlertSchema.parse({
     ...parsed.data,
@@ -113,7 +114,49 @@ async function claimAlert(
     claimId,
     claimExpiresAt: new Date(now.getTime() + CLAIM_TTL_MS).toISOString(),
   });
-  return await store.setIfMatch(storageKey, claimed, current.etag) ? claimId : undefined;
+  return await store.setIfMatch(storageKey, claimed, current.etag)
+    ? { alert: claimed, claimId }
+    : undefined;
+}
+
+function sameParkingAlertVersion(left: StoredParkingAlert, right: StoredParkingAlert): boolean {
+  return left.id === right.id
+    && left.subscriptionId === right.subscriptionId
+    && left.parkingId === right.parkingId
+    && left.parkingName === right.parkingName
+    && left.threshold === right.threshold
+    && left.createdAt === right.createdAt
+    && left.expiresAt === right.expiresAt;
+}
+
+async function reclaimExpiredClaim(
+  storageKey: string,
+  dependencies: ParkingAlertCheckDependencies,
+  now: Date,
+): Promise<StoredParkingAlert | undefined> {
+  const store = parkingAlertsStore(dependencies.stores);
+  const current = await store.getWithMetadata(storageKey);
+  if (!current?.etag) return undefined;
+  const parsed = StoredParkingAlertSchema.safeParse(current.value);
+  const claimExpiresAt = parsed.success && parsed.data.claimExpiresAt
+    ? Date.parse(parsed.data.claimExpiresAt)
+    : Number.NaN;
+  if (!parsed.success || parsed.data.state !== 'claimed'
+    || !Number.isFinite(claimExpiresAt) || claimExpiresAt > now.getTime()) return undefined;
+  const pending = StoredParkingAlertSchema.parse({ ...parsed.data, state: 'pending' });
+  delete pending.claimId;
+  delete pending.claimExpiresAt;
+  return await store.setIfMatch(storageKey, pending, current.etag) ? pending : undefined;
+}
+
+async function confirmClaim(
+  storageKey: string,
+  claimId: string,
+  dependencies: ParkingAlertCheckDependencies,
+): Promise<boolean> {
+  const current = await parkingAlertsStore(dependencies.stores).get(storageKey);
+  const parsed = current === undefined ? undefined : StoredParkingAlertSchema.safeParse(current);
+  return parsed?.success === true && parsed.data.state === 'claimed' && parsed.data.claimId === claimId;
 }
 
 async function markDelivered(
@@ -306,25 +349,38 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
       result.deleted += 1;
       continue;
     }
-    if (parsed.data.state === 'delivered' || parsed.data.state === 'claimed') {
-      if (parsed.data.state === 'claimed') {
-        claimedFacilities.add(`${parsed.data.subscriptionId}\u0000${parsed.data.parkingId}`);
-      }
+    let activeAlert = parsed.data;
+    if (activeAlert.state === 'delivered') {
       result.retained += 1;
       continue;
     }
+    if (activeAlert.state === 'claimed') {
+      try {
+        const reclaimed = await reclaimExpiredClaim(storageKey, dependencies, now);
+        if (!reclaimed) {
+          claimedFacilities.add(`${activeAlert.subscriptionId}\u0000${activeAlert.parkingId}`);
+          result.retained += 1;
+          continue;
+        }
+        activeAlert = reclaimed;
+      } catch {
+        result.errors += 1;
+        result.retained += 1;
+        continue;
+      }
+    }
     result.checked += 1;
-    let subscription = subscriptionCache.get(parsed.data.subscriptionId);
-    if (subscription === undefined && !subscriptionCache.has(parsed.data.subscriptionId)) {
-      subscription = await dependencies.stores.subscriptions.get(parsed.data.subscriptionId);
-      subscriptionCache.set(parsed.data.subscriptionId, subscription);
+    let subscription = subscriptionCache.get(activeAlert.subscriptionId);
+    if (subscription === undefined && !subscriptionCache.has(activeAlert.subscriptionId)) {
+      subscription = await dependencies.stores.subscriptions.get(activeAlert.subscriptionId);
+      subscriptionCache.set(activeAlert.subscriptionId, subscription);
     }
     if (!subscription) {
       await store.delete(storageKey);
       result.deleted += 1;
       continue;
     }
-    pending.push({ storageKey, alert: parsed.data, subscription });
+    pending.push({ storageKey, alert: activeAlert, subscription });
   }
 
   const uniquePending = new Map<string, PendingParkingAlert>();
@@ -361,6 +417,11 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
     result.retained += deduplicatedPending.length;
     return result;
   }
+  if (snapshot.stale) {
+    result.retained += deduplicatedPending.length;
+    await retryDeadSubscriptionCleanups(dependencies, result, createdDeadMarkers);
+    return result;
+  }
 
   const deadSubscriptions = new Set<string>();
   for (const item of deduplicatedPending) {
@@ -372,88 +433,130 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
       continue;
     }
 
-    let claimId: string | undefined;
+    let lease: PushReservationLease | undefined;
     try {
-      claimId = await claimAlert(item.storageKey, dependencies, now);
+      lease = await acquirePushMutationReservation(
+        parkingReservationsStore(dependencies.stores),
+        item.subscription.id,
+        now,
+        dependencies.randomBytes ?? randomBytes,
+      );
     } catch {
       result.errors += 1;
       result.retained += 1;
       continue;
     }
-    if (!claimId) {
+    if (!lease) {
       result.retained += 1;
       continue;
     }
-
-    const payload = JSON.stringify({
-      title: '泊車低空位提醒',
-      body: notificationBody(item.alert, facility),
-      parkingId: item.alert.parkingId,
-      parkingName: facility.name,
-      freeSpaces,
-      threshold: item.alert.threshold,
-      url: deepLink(appUrl(dependencies), item.alert.parkingId),
-    });
     try {
-      await dependencies.sendNotification(item.subscription, payload);
-    } catch (error) {
-      const status = pushStatus(error);
-      if (status === 404 || status === 410) {
-        deadSubscriptions.add(item.subscription.id);
-        result.deadSubscriptions += 1;
-        const markerKey = deadSubscriptionCleanupKey(item.subscription.id);
-        const markerStored = await markDeadSubscription(item.subscription.id, dependencies, now, result);
-        if (markerStored) createdDeadMarkers.add(markerKey);
-        try {
-          await deleteSubscriptionAndAlerts(item.subscription.id, dependencies.stores);
-          result.deleted += deduplicatedPending.filter((candidate) => candidate.subscription.id === item.subscription.id).length;
-          if (markerStored) {
-            const markerStore = deadSubscriptionCleanupStore(dependencies.stores);
-            if (markerStore) {
-              try {
-                await markerStore.delete(markerKey);
-              } catch {
-                // Leave the marker for the next run if clearing it fails.
-                result.errors += 1;
-              }
-            }
-          }
-        } catch {
-          // A dead provider must not abort the rest of the scheduled run.
-          result.errors += 1;
-          try {
-            await releaseClaim(item.storageKey, claimId, dependencies);
-          } catch {
-            result.errors += 1;
-          }
-        }
-      } else {
-        if (isTransientPushFailure(error)) {
-          try { await releaseClaim(item.storageKey, claimId, dependencies); } catch { /* retry can reclaim after expiry */ }
-        }
-        result.errors += 1;
-        result.retained += 1;
-      }
-      continue;
-    }
-
-    try {
-      if (!await markDelivered(item.storageKey, claimId, dependencies, now)) {
+      let claimed: Awaited<ReturnType<typeof claimAlert>>;
+      try {
+        claimed = await claimAlert(item.storageKey, item.alert, dependencies, now);
+      } catch {
         result.errors += 1;
         result.retained += 1;
         continue;
       }
-      result.sent += 1;
+      if (!claimed) {
+        result.retained += 1;
+        continue;
+      }
       try {
-        await store.delete(item.storageKey);
-        result.deleted += 1;
+        if (!await confirmClaim(item.storageKey, claimed.claimId, dependencies)) {
+          await releaseClaim(item.storageKey, claimed.claimId, dependencies);
+          result.retained += 1;
+          continue;
+        }
       } catch {
+        try { await releaseClaim(item.storageKey, claimed.claimId, dependencies); } catch { /* next run can reclaim */ }
+        result.errors += 1;
+        result.retained += 1;
+        continue;
+      }
+
+      const payload = JSON.stringify({
+        title: '泊車低空位提醒',
+        body: notificationBody(claimed.alert, facility),
+        parkingId: claimed.alert.parkingId,
+        parkingName: facility.name,
+        freeSpaces,
+        threshold: claimed.alert.threshold,
+        url: deepLink(appUrl(dependencies), claimed.alert.parkingId),
+      });
+      try {
+        await dependencies.sendNotification(item.subscription, payload);
+      } catch (error) {
+        const status = pushStatus(error);
+        if (status === 404 || status === 410) {
+          deadSubscriptions.add(item.subscription.id);
+          result.deadSubscriptions += 1;
+          const markerKey = deadSubscriptionCleanupKey(item.subscription.id);
+          const markerStored = await markDeadSubscription(item.subscription.id, dependencies, now, result);
+          if (markerStored) createdDeadMarkers.add(markerKey);
+          try {
+            await deleteSubscriptionAndAlerts(item.subscription.id, dependencies.stores);
+            result.deleted += deduplicatedPending.filter((candidate) => candidate.subscription.id === item.subscription.id).length;
+            if (markerStored) {
+              const markerStore = deadSubscriptionCleanupStore(dependencies.stores);
+              if (markerStore) {
+                try {
+                  await markerStore.delete(markerKey);
+                } catch {
+                  // Leave the marker for the next run if clearing it fails.
+                  result.errors += 1;
+                }
+              }
+            }
+          } catch {
+            // A dead provider must not abort the rest of the scheduled run.
+            result.errors += 1;
+            try {
+              await releaseClaim(item.storageKey, claimed.claimId, dependencies);
+            } catch {
+              result.errors += 1;
+            }
+          }
+        } else {
+          try { await releaseClaim(item.storageKey, claimed.claimId, dependencies); } catch { /* next run can reclaim */ }
+          result.errors += 1;
+          result.retained += 1;
+        }
+        continue;
+      }
+
+      try {
+        if (!await markDelivered(item.storageKey, claimed.claimId, dependencies, now)) {
+          try { await releaseClaim(item.storageKey, claimed.claimId, dependencies); } catch { /* next run can reclaim */ }
+          result.errors += 1;
+          result.retained += 1;
+          continue;
+        }
+        result.sent += 1;
+        try {
+          await store.delete(item.storageKey);
+          result.deleted += 1;
+        } catch {
+          result.errors += 1;
+          result.retained += 1;
+        }
+      } catch {
+        try { await releaseClaim(item.storageKey, claimed.claimId, dependencies); } catch { /* next run can reclaim */ }
         result.errors += 1;
         result.retained += 1;
       }
-    } catch {
-      result.errors += 1;
-      result.retained += 1;
+    } finally {
+      try {
+        await releasePushMutationReservation(
+          parkingReservationsStore(dependencies.stores),
+          item.subscription.id,
+          lease,
+          now,
+        );
+      } catch {
+        // The lease expires and can be reclaimed by a later API/checker run.
+      }
     }
   }
   await retryDeadSubscriptionCleanups(dependencies, result, createdDeadMarkers);

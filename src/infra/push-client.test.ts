@@ -105,9 +105,17 @@ describe('browser push client', () => {
     await client.createAlert({ routeId: '1', direction: 0, targetStopId: 'B', targetStopIndex: 1, threshold: 2 });
     await client.deleteAlert('alert-2');
 
-    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/push/alerts', expect.objectContaining({ method: 'GET', headers: expect.objectContaining({ Authorization: 'Bearer token-1' }) }));
-    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/push/alerts', expect.objectContaining({ method: 'POST', body: JSON.stringify({ routeId: '1', direction: 0, targetStopId: 'B', targetStopIndex: 1, threshold: 2 }) }));
-    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/push/alerts/alert-2', expect.objectContaining({ method: 'DELETE', headers: expect.objectContaining({ Authorization: 'Bearer token-1' }) }));
+    const authenticatedHeaders = expect.objectContaining({
+      Authorization: 'Bearer token-1',
+      'X-Subscription-Id': 'sub-1',
+    });
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/push/alerts', expect.objectContaining({ method: 'GET', headers: authenticatedHeaders }));
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/push/alerts', expect.objectContaining({
+      method: 'POST',
+      headers: authenticatedHeaders,
+      body: JSON.stringify({ routeId: '1', direction: 0, targetStopId: 'B', targetStopIndex: 1, threshold: 2 }),
+    }));
+    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/push/alerts/alert-2', expect.objectContaining({ method: 'DELETE', headers: authenticatedHeaders }));
   });
 
   it('uses the same stored push identity for parking alert list/create/delete operations', async () => {
@@ -123,9 +131,17 @@ describe('browser push client', () => {
     await expect(client.createParkingAlert?.({ parkingId: '43', parkingName: '乙停車場', threshold: 7 })).resolves.toMatchObject({ parkingId: '43' });
     await client.deleteParkingAlert?.('parking-alert-2');
 
-    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/push/parking-alerts', expect.objectContaining({ method: 'GET', headers: expect.objectContaining({ Authorization: 'Bearer token-1' }) }));
-    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/push/parking-alerts', expect.objectContaining({ method: 'POST', body: JSON.stringify({ parkingId: '43', parkingName: '乙停車場', threshold: 7 }) }));
-    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/push/parking-alerts/parking-alert-2', expect.objectContaining({ method: 'DELETE', headers: expect.objectContaining({ Authorization: 'Bearer token-1' }) }));
+    const authenticatedHeaders = expect.objectContaining({
+      Authorization: 'Bearer token-1',
+      'X-Subscription-Id': 'sub-1',
+    });
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/push/parking-alerts', expect.objectContaining({ method: 'GET', headers: authenticatedHeaders }));
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/push/parking-alerts', expect.objectContaining({
+      method: 'POST',
+      headers: authenticatedHeaders,
+      body: JSON.stringify({ parkingId: '43', parkingName: '乙停車場', threshold: 7 }),
+    }));
+    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/push/parking-alerts/parking-alert-2', expect.objectContaining({ method: 'DELETE', headers: authenticatedHeaders }));
   });
 
   it('does not create a parking alert when permission is denied', async () => {

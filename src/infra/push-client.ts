@@ -474,6 +474,7 @@ export function createPushClient(options: PushClientOptions = {}): PushClient {
   const authorizationHeaders = (identity: PushIdentity): Record<string, string> => ({
     Accept: 'application/json',
     Authorization: `Bearer ${identity.alertToken}`,
+    'X-Subscription-Id': identity.subscriptionId,
   });
 
   const authenticatedRequestJson = async (path: string, init: RequestInit): Promise<unknown> => {

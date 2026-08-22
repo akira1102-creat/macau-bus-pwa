@@ -34,13 +34,13 @@ describe('service worker network policy', () => {
     expect(getCatalogCacheRevision([
       { url: '/assets/app.js', revision: 'app-rev' },
       { url: '/data/catalog.json', revision: 'catalog-rev-1' },
-    ], 'macau-bus-pwa-v0.4.0')).toBe('catalog-rev-1');
+    ], 'macau-bus-pwa-v0.4.1')).toBe('catalog-rev-1');
     expect(getCatalogCacheRevision([
       { url: '/data/catalog.json', revision: null },
-    ], 'macau-bus-pwa-v0.4.0')).toBe('macau-bus-pwa-v0.4.0');
+    ], 'macau-bus-pwa-v0.4.1')).toBe('macau-bus-pwa-v0.4.1');
     expect(getCatalogCacheRevision([
       { url: '/macau-bus-pwa/data/catalog.json', revision: 'catalog-pages-rev' },
-    ], 'macau-bus-pwa-v0.4.0')).toBe('catalog-pages-rev');
+    ], 'macau-bus-pwa-v0.4.1')).toBe('catalog-pages-rev');
   });
 
   it('recognizes hashed assets below a project Pages base path', () => {

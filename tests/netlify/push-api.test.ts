@@ -13,6 +13,7 @@ import {
 import {
   createPushAlertsHandler,
 } from '../../netlify/functions/push-alerts';
+import { runArrivalAlertCheck } from '../../netlify/functions/check-arrival-alerts';
 import { createCatalogRepository } from '../../src/data/catalog-repository';
 import { TransitCatalogSchema } from '../../shared/transit-contract';
 import { RealtimeRateLimiter } from '../../server/routes/realtime';
@@ -340,6 +341,49 @@ describe('push subscription and alert CRUD', () => {
     expect(response.status).toBe(403);
   });
 
+  it('bounds the legacy token-only subscription scan and fails closed when the match is beyond it', async () => {
+    const targetToken = 'legacy-token-beyond-bound';
+    for (let index = 0; index < 100; index += 1) {
+      const id = `legacy-${String(index).padStart(3, '0')}`;
+      await subscriptions.set(id, {
+        id,
+        endpoint: `https://fcm.googleapis.com/fcm/send/${id}`,
+        keys: { p256dh: 'public-key', auth: 'auth-secret' },
+        tokenHash: createHash('sha256').update(`decoy-${index}`).digest('hex'),
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      });
+    }
+    await subscriptions.set('legacy-target', {
+      id: 'legacy-target',
+      endpoint: 'https://fcm.googleapis.com/fcm/send/legacy-target',
+      keys: { p256dh: 'public-key', auth: 'auth-secret' },
+      tokenHash: createHash('sha256').update(targetToken).digest('hex'),
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    });
+    const getSubscription = vi.spyOn(subscriptions, 'get');
+
+    const response = await createPushAlertsHandler(dependencies)(request('/api/push/alerts', 'GET', undefined, {
+      Authorization: `Bearer ${targetToken}`,
+    }), context(undefined, '203.0.113.88'));
+
+    expect(response.status).toBe(401);
+    expect(getSubscription.mock.calls.length).toBeLessThanOrEqual(100);
+  });
+
+  it('returns a safe no-store 503 when the legacy authentication scan storage fails', async () => {
+    vi.spyOn(subscriptions, 'list').mockRejectedValue(new Error('private blob detail'));
+
+    const response = await createPushAlertsHandler(dependencies)(request('/api/push/alerts', 'GET', undefined, {
+      Authorization: 'Bearer legacy-token',
+    }), context(undefined, '203.0.113.89'));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'storage-unavailable' });
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
   it('uses subscription-prefixed alert keys for list and direct-key delete', async () => {
     const subscriptionsHandler = createPushSubscriptionsHandler(dependencies);
     const alertsHandler = createPushAlertsHandler(dependencies);
@@ -582,6 +626,56 @@ describe('push subscription and alert CRUD', () => {
 
     expect(response.status).toBe(409);
     expect(await subscriptions.list()).toHaveLength(0);
+  });
+
+  it('lets an in-flight DELETE reservation cancel an alert before the checker can send', async () => {
+    const subscriptionsHandler = createPushSubscriptionsHandler(dependencies);
+    const alertsHandler = createPushAlertsHandler(dependencies);
+    const subscriptionResponse = await subscriptionsHandler(request('/api/push/subscriptions', 'POST', {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/delete-checker-race',
+      keys: { p256dh: 'public-key', auth: 'auth-secret' },
+    }), {} as PushContext);
+    const identity = await subscriptionResponse.json() as { subscriptionId: string; alertToken: string };
+    const created = await alertsHandler(request('/api/push/alerts', 'POST', {
+      routeId: '1', direction: 0, targetStopId: 'M2', targetStopIndex: 1, threshold: 1,
+    }, auth(identity)), context());
+    const summary = await created.json() as { id: string };
+    const storageKey = `${identity.subscriptionId}/${summary.id}`;
+    let enteredResolve!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+    let releaseResolve!: () => void;
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    const getAlert = alerts.get.bind(alerts);
+    let blocked = false;
+    vi.spyOn(alerts, 'get').mockImplementation(async (key) => {
+      if (key === storageKey && !blocked) {
+        blocked = true;
+        enteredResolve();
+        await release;
+      }
+      return getAlert(key);
+    });
+
+    const deleting = alertsHandler(
+      request(`/api/push/alerts/${summary.id}`, 'DELETE', undefined, auth(identity)),
+      context(summary.id),
+    );
+    await entered;
+    const sender = vi.fn(async () => undefined);
+    await runArrivalAlertCheck({
+      stores: dependencies.stores,
+      catalog,
+      now: () => new Date(now),
+      fetchRoute: vi.fn(async () => ([
+        { plate: 'PLATE-001', stationCode: 'M2', speedKph: 8, status: null, passengerFlow: null, busType: null, facilities: null },
+      ])),
+      sendNotification: sender,
+    });
+
+    expect(sender).not.toHaveBeenCalled();
+    releaseResolve();
+    expect((await deleting).status).toBe(200);
+    expect(await alerts.get(storageKey)).toBeUndefined();
   });
 
   it('does not exceed five active alerts when six creates race concurrently', async () => {

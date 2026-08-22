@@ -32,7 +32,7 @@ npm run build
 
 如果 `public/data/catalog.json` 尚未同步或暫時被重新命名，server 仍會啟動並提供 static shell；`/api/health` 會回傳 `catalogReady: false`，需要路線 catalog 的 API 會回傳 503、`no-store` 及 `npm run data:sync` action。可用 `CATALOG_PATH` 指向另一個 catalog 路徑作本機 smoke test。
 
-PWA release id 為 `macau-bus-pwa-v0.4.0`，並同步出現在 app release、service-worker cache names 及 production worker。Service worker 使用 navigation NetworkFirst、hashed shell／catalog CacheFirst，catalog cache 會包含 build-time catalog revision，`/api`（包括 project path 下的 API）及 OpenStreetMap tiles NetworkOnly；更新會在啟動、pageshow 及重返 visible 時檢查，保留 localStorage／IndexedDB。v0.4.0 保留巴士到站／車牌功能，並加入泊車模式、DSAT 公開泊車資料、收藏、地圖、導航及一次性低空位 Web Push。
+PWA release id 為 `macau-bus-pwa-v0.4.1`，並同步出現在 app release、service-worker cache names 及 production worker。Service worker 使用 navigation NetworkFirst、hashed shell／catalog CacheFirst，catalog cache 會包含 build-time catalog revision，`/api`（包括 project path 下的 API）及 OpenStreetMap tiles NetworkOnly；更新會在啟動、pageshow 及重返 visible 時檢查，保留 localStorage／IndexedDB。v0.4.1 保留巴士到站／車牌及泊車模式，並加固一次性提醒 claim 重試、API/checker mutation serialization 及直接 subscription identity header。
 
 可用以下指令執行完整本機驗證及兩個 viewport 的 Playwright smoke：
 

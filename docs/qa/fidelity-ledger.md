@@ -1,4 +1,4 @@
-# 視覺保真度記錄 — v0.4.0
+# 視覺保真度記錄 — v0.4.1
 
 最終比較已完成；完整證據及 iteration history 見專案根目錄 `design-qa.md`。
 
@@ -15,7 +15,7 @@
 
 ## 最終比較
 
-- Release：`macau-bus-pwa-v0.4.0`；parking integration、unit/integration 及 fresh E2E 以最終驗證結果為準。
+- Release：`macau-bus-pwa-v0.4.1`；parking integration、push concurrency hardening、unit/integration 及 fresh E2E 以最終驗證結果為準。
 - 對照來源：`docs/design/home-concept.png`、`docs/design/route-concept.png`。
 - 手機 render：390×844；桌面 render：1280×900。
 - Copy：繁體中文介面一致；泊車頁明確標示 DSAT、OpenStreetMap 及「數值可能延遲」，未知空位使用 `—`。

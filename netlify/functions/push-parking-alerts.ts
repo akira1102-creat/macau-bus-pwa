@@ -6,11 +6,10 @@ import { guardApiRequest, jsonResponse, type ApiRequestOptions } from './_shared
 import {
   ParkingAlertInputSchema,
   ParkingAlertSummarySchema,
-  PushReservationSchema,
   StoredParkingAlertSchema,
-  type PushReservation,
 } from './_shared/push-contract';
 import {
+  acquirePushMutationReservation,
   authenticateSubscription,
   currentTime,
   getDefaultPushDependencies,
@@ -20,7 +19,9 @@ import {
   parkingAlertStoragePrefix,
   parkingAlertsStore,
   parkingReservationsStore,
+  releasePushMutationReservation,
   type PushApiDependencies,
+  type PushReservationLease,
   type StoredParkingAlert,
 } from './_shared/push-store';
 
@@ -38,12 +39,6 @@ const MUTATION_OPTIONS: ApiRequestOptions = { ...API_OPTIONS, requireTrustedOrig
 const MAX_BODY_BYTES = 16 * 1024;
 export const MAX_ACTIVE_PARKING_ALERTS = 10;
 export const PARKING_ALERT_EXPIRY_MS = 12 * 60 * 60 * 1_000;
-const RESERVATION_TTL_MS = 15_000;
-
-interface ReservationLease {
-  owner: string;
-  etag: string;
-}
 
 function tooLarge(request: Request): boolean {
   const value = request.headers.get('content-length');
@@ -97,50 +92,6 @@ async function readActiveParkingAlerts(
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
 }
 
-async function acquireReservation(
-  subscriptionId: string,
-  dependencies: PushApiDependencies,
-  now: Date,
-): Promise<ReservationLease | undefined> {
-  const store = parkingReservationsStore(dependencies.stores);
-  const owner = makeRandomId(dependencies.randomBytes ?? randomBytes);
-  const next: PushReservation = {
-    id: subscriptionId,
-    subscriptionId,
-    owner,
-    expiresAt: new Date(now.getTime() + RESERVATION_TTL_MS).toISOString(),
-  };
-  const existing = await store.getWithMetadata(subscriptionId);
-  if (existing === undefined) {
-    if (!await store.setIfNew(subscriptionId, next)) return undefined;
-  } else {
-    const parsed = PushReservationSchema.safeParse(existing.value);
-    const expiresAt = parsed.success ? Date.parse(parsed.data.expiresAt) : Number.NaN;
-    if (Number.isFinite(expiresAt) && expiresAt > now.getTime()) return undefined;
-    if (!existing.etag || !await store.setIfMatch(subscriptionId, next, existing.etag)) return undefined;
-  }
-  const stored = await store.getWithMetadata(subscriptionId);
-  const parsed = stored === undefined ? undefined : PushReservationSchema.safeParse(stored.value);
-  return stored?.etag && parsed?.success && parsed.data.owner === owner ? { owner, etag: stored.etag } : undefined;
-}
-
-async function releaseReservation(
-  subscriptionId: string,
-  lease: ReservationLease,
-  dependencies: PushApiDependencies,
-  now: Date,
-): Promise<void> {
-  const store = parkingReservationsStore(dependencies.stores);
-  const current = await store.getWithMetadata(subscriptionId);
-  if (!current?.etag) return;
-  const parsed = PushReservationSchema.safeParse(current.value);
-  if (!parsed.success || parsed.data.owner !== lease.owner) return;
-  await store.setIfMatch(subscriptionId, {
-    ...parsed.data,
-    expiresAt: new Date(now.getTime() - 1).toISOString(),
-  }, current.etag);
-}
-
 function alertIdFromRequest(request: Request, context: Context): string {
   const fromContext = context.params?.alertId?.trim();
   if (fromContext) return fromContext;
@@ -191,9 +142,14 @@ export function createParkingPushAlertsHandler(
     if (request.method === 'DELETE') {
       const alertId = alertIdFromRequest(request, context);
       if (!alertId) return jsonResponse(request, { error: 'not-found' }, 404, {}, options);
-      let lease: ReservationLease | undefined;
+      let lease: PushReservationLease | undefined;
       try {
-        lease = await acquireReservation(subscription.id, dependencies, now);
+        lease = await acquirePushMutationReservation(
+          parkingReservationsStore(dependencies.stores),
+          subscription.id,
+          now,
+          dependencies.randomBytes ?? randomBytes,
+        );
         if (!lease) return jsonResponse(request, { error: 'active-limit-busy' }, 409, {}, options);
         const value = await store.get(parkingAlertStorageKey(subscription.id, alertId));
         const parsed = value === undefined ? undefined : StoredParkingAlertSchema.safeParse(value);
@@ -207,7 +163,12 @@ export function createParkingPushAlertsHandler(
       } finally {
         if (lease) {
           try {
-            await releaseReservation(subscription.id, lease, dependencies, now);
+            await releasePushMutationReservation(
+              parkingReservationsStore(dependencies.stores),
+              subscription.id,
+              lease,
+              now,
+            );
           } catch {
             // An expired reservation can be safely reclaimed on the next request.
           }
@@ -229,9 +190,14 @@ export function createParkingPushAlertsHandler(
     const input = ParkingAlertInputSchema.safeParse(payload);
     if (!input.success) return jsonResponse(request, { error: 'invalid-alert' }, 400, {}, options);
 
-    let lease: ReservationLease | undefined;
+    let lease: PushReservationLease | undefined;
     try {
-      lease = await acquireReservation(subscription.id, dependencies, now);
+      lease = await acquirePushMutationReservation(
+        parkingReservationsStore(dependencies.stores),
+        subscription.id,
+        now,
+        dependencies.randomBytes ?? randomBytes,
+      );
       if (!lease) return jsonResponse(request, { error: 'active-limit-busy' }, 409, {}, options);
       const active = await readActiveParkingAlerts(subscription.id, dependencies, now);
       const existing = active.find((alert) => alert.parkingId === input.data.parkingId);
@@ -263,7 +229,12 @@ export function createParkingPushAlertsHandler(
     } finally {
       if (lease) {
         try {
-          await releaseReservation(subscription.id, lease, dependencies, now);
+          await releasePushMutationReservation(
+            parkingReservationsStore(dependencies.stores),
+            subscription.id,
+            lease,
+            now,
+          );
         } catch {
           // An expired reservation can be safely reclaimed on the next request.
         }

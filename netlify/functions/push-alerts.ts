@@ -7,11 +7,10 @@ import { guardApiRequest, jsonResponse, type ApiRequestOptions } from './_shared
 import {
   ArrivalAlertInputSchema,
   ArrivalAlertSummarySchema,
-  PushReservationSchema,
   StoredAlertSchema,
-  type PushReservation,
 } from './_shared/push-contract';
 import {
+  acquirePushMutationReservation,
   authenticateSubscription,
   alertStorageKey,
   alertStoragePrefix,
@@ -19,7 +18,9 @@ import {
   getPushRateLimiter,
   getDefaultPushDependencies,
   makeRandomId,
+  releasePushMutationReservation,
   type PushApiDependencies,
+  type PushReservationLease,
 } from './_shared/push-store';
 
 const ALERTS_API_OPTIONS: ApiRequestOptions = {
@@ -39,7 +40,6 @@ const ALERTS_MUTATION_API_OPTIONS: ApiRequestOptions = {
 const MAX_ALERT_BODY_BYTES = 16 * 1024;
 const MAX_ACTIVE_ALERTS = 5;
 const ALERT_EXPIRY_MS = 4 * 60 * 60 * 1_000;
-const RESERVATION_TTL_MS = 15_000;
 
 function tooLarge(request: Request): boolean {
   const value = request.headers.get('content-length');
@@ -77,58 +77,6 @@ async function catalogFor(dependencies: PushApiDependencies) {
   return dependencies.getCatalog?.() ?? getCatalogRepository();
 }
 
-interface ReservationLease {
-  owner: string;
-  etag: string;
-}
-
-async function acquireAlertCreationReservation(
-  subscriptionId: string,
-  dependencies: PushApiDependencies,
-  now: Date,
-): Promise<ReservationLease | undefined> {
-  const owner = makeRandomId(dependencies.randomBytes ?? randomBytes);
-  const next: PushReservation = {
-    id: subscriptionId,
-    subscriptionId,
-    owner,
-    expiresAt: new Date(now.getTime() + RESERVATION_TTL_MS).toISOString(),
-  };
-  const existing = await dependencies.stores.reservations.getWithMetadata(subscriptionId);
-  if (existing === undefined) {
-    if (!await dependencies.stores.reservations.setIfNew(subscriptionId, next)) return undefined;
-  } else {
-    const parsed = PushReservationSchema.safeParse(existing.value);
-    const expiresAt = parsed.success ? Date.parse(parsed.data.expiresAt) : Number.NaN;
-    if (Number.isFinite(expiresAt) && expiresAt > now.getTime()) return undefined;
-    if (!existing.etag || !await dependencies.stores.reservations.setIfMatch(subscriptionId, next, existing.etag)) {
-      return undefined;
-    }
-  }
-  const stored = await dependencies.stores.reservations.getWithMetadata(subscriptionId);
-  if (!stored?.etag) return undefined;
-  const parsed = PushReservationSchema.safeParse(stored.value);
-  return parsed.success && parsed.data.owner === owner
-    ? { owner, etag: stored.etag }
-    : undefined;
-}
-
-async function releaseAlertCreationReservation(
-  subscriptionId: string,
-  lease: ReservationLease,
-  dependencies: PushApiDependencies,
-  now: Date,
-): Promise<void> {
-  const current = await dependencies.stores.reservations.getWithMetadata(subscriptionId);
-  if (!current?.etag) return;
-  const parsed = PushReservationSchema.safeParse(current.value);
-  if (!parsed.success || parsed.data.owner !== lease.owner) return;
-  await dependencies.stores.reservations.setIfMatch(subscriptionId, {
-    ...parsed.data,
-    expiresAt: new Date(now.getTime() - 1).toISOString(),
-  }, current.etag);
-}
-
 function alertIdFromRequest(request: Request, context: Context): string {
   const fromContext = context.params?.alertId?.trim();
   if (fromContext) return fromContext;
@@ -154,7 +102,12 @@ export function createPushAlertsHandler(
       }
     }
 
-    const subscription = await authenticateSubscription(request, dependencies.stores);
+    let subscription: Awaited<ReturnType<typeof authenticateSubscription>>;
+    try {
+      subscription = await authenticateSubscription(request, dependencies.stores);
+    } catch {
+      return jsonResponse(request, { error: 'storage-unavailable' }, 503, {}, apiOptions);
+    }
     if (!subscription) {
       return jsonResponse(request, { error: 'unauthorized' }, 401, {}, apiOptions);
     }
@@ -170,13 +123,33 @@ export function createPushAlertsHandler(
       if (!alertId) {
         return jsonResponse(request, { error: 'not-found' }, 404, {}, apiOptions);
       }
-      const value = await dependencies.stores.alerts.get(alertStorageKey(subscription.id, alertId));
-      const parsed = value === undefined ? undefined : StoredAlertSchema.safeParse(value);
-      if (!parsed?.success || parsed.data.subscriptionId !== subscription.id) {
-        return jsonResponse(request, { error: 'not-found' }, 404, {}, apiOptions);
+      let lease: PushReservationLease | undefined;
+      try {
+        lease = await acquirePushMutationReservation(
+          dependencies.stores.reservations,
+          subscription.id,
+          now,
+          dependencies.randomBytes ?? randomBytes,
+        );
+        if (!lease) return jsonResponse(request, { error: 'active-limit-busy' }, 409, {}, apiOptions);
+        const value = await dependencies.stores.alerts.get(alertStorageKey(subscription.id, alertId));
+        const parsed = value === undefined ? undefined : StoredAlertSchema.safeParse(value);
+        if (!parsed?.success || parsed.data.subscriptionId !== subscription.id) {
+          return jsonResponse(request, { error: 'not-found' }, 404, {}, apiOptions);
+        }
+        await dependencies.stores.alerts.delete(alertStorageKey(subscription.id, alertId));
+        return jsonResponse(request, { deleted: true }, 200, {}, apiOptions);
+      } catch {
+        return jsonResponse(request, { error: 'storage-unavailable' }, 503, {}, apiOptions);
+      } finally {
+        if (lease) {
+          try {
+            await releasePushMutationReservation(dependencies.stores.reservations, subscription.id, lease, now);
+          } catch {
+            // An expired reservation is safe to reclaim on the next request.
+          }
+        }
       }
-      await dependencies.stores.alerts.delete(alertStorageKey(subscription.id, alertId));
-      return jsonResponse(request, { deleted: true }, 200, {}, apiOptions);
     }
 
     if (tooLarge(request)) {
@@ -207,9 +180,14 @@ export function createPushAlertsHandler(
       return jsonResponse(request, { error: 'invalid-alert' }, 400, {}, apiOptions);
     }
 
-    let lease: ReservationLease | undefined;
+    let lease: PushReservationLease | undefined;
     try {
-      lease = await acquireAlertCreationReservation(subscription.id, dependencies, now);
+      lease = await acquirePushMutationReservation(
+        dependencies.stores.reservations,
+        subscription.id,
+        now,
+        dependencies.randomBytes ?? randomBytes,
+      );
       if (!lease) {
         return jsonResponse(request, { error: 'active-limit-busy' }, 409, {}, apiOptions);
       }
@@ -247,7 +225,7 @@ export function createPushAlertsHandler(
     } finally {
       if (lease) {
         try {
-          await releaseAlertCreationReservation(subscription.id, lease, dependencies, now);
+          await releasePushMutationReservation(dependencies.stores.reservations, subscription.id, lease, now);
         } catch {
           // An expired reservation is safe to reclaim on the next request.
         }

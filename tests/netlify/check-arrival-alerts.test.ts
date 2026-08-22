@@ -197,15 +197,16 @@ describe('minute arrival alert checker', () => {
     expect(pushFailure).toHaveBeenCalledTimes(2);
     expect(await alerts.get(alertKey('alert-push'))).toBeUndefined();
 
-    const ambiguousFailure = vi.fn(async () => { throw { transient: true }; });
+    const ambiguousFailure = vi.fn()
+      .mockRejectedValueOnce({ unexpected: true })
+      .mockResolvedValueOnce(undefined);
     const ambiguous = setup(undefined, ambiguousFailure);
     await alerts.set(alertKey('alert-ambiguous'), alert('alert-ambiguous', 'M2', 1, 1));
     await runArrivalAlertCheck(ambiguous);
-    expect(await alerts.get(alertKey('alert-ambiguous'))).toMatchObject({ state: 'claimed' });
-    now = new Date('2026-08-22T00:00:16.000Z');
+    expect(await alerts.get(alertKey('alert-ambiguous'))).toMatchObject({ state: 'pending' });
     await runArrivalAlertCheck(ambiguous);
-    expect(ambiguousFailure).toHaveBeenCalledTimes(1);
-    expect(await alerts.get(alertKey('alert-ambiguous'))).toMatchObject({ state: 'claimed' });
+    expect(ambiguousFailure).toHaveBeenCalledTimes(2);
+    expect(await alerts.get(alertKey('alert-ambiguous'))).toBeUndefined();
   });
 
   it('deletes expired alerts before fetching observations', async () => {
@@ -229,7 +230,7 @@ describe('minute arrival alert checker', () => {
       id: subscription.id,
       subscriptionId: subscription.id,
       owner: 'dead-owner',
-      expiresAt: '2026-08-22T00:00:15.000Z',
+      expiresAt: '2026-08-21T23:59:59.000Z',
     });
     await alerts.set(alertKey('alert-dead-1'), alert('alert-dead-1', 'M2', 1, 1));
     await alerts.set(alertKey('alert-dead-2'), alert('alert-dead-2', 'M3', 2, 1));
@@ -308,30 +309,29 @@ describe('minute arrival alert checker', () => {
     expect(await alerts.get(alertKey('alert-overlap'))).toBeUndefined();
   });
 
-  it('does not resend after provider acceptance when delivered CAS fails, even after lease expiry', async () => {
+  it('releases the claim so a delivered CAS failure can retry on the next run', async () => {
     const dependencies = setup();
     await alerts.set(alertKey('alert-accepted-cas-failure'), alert('alert-accepted-cas-failure', 'M2', 1, 1));
     const setIfMatch = alerts.setIfMatch.bind(alerts);
+    let failDelivered = true;
     vi.spyOn(alerts, 'setIfMatch').mockImplementation(async (key, value, etag) => {
-      if (value.state === 'delivered') return false;
+      if (value.state === 'delivered' && failDelivered) {
+        failDelivered = false;
+        return false;
+      }
       return setIfMatch(key, value, etag);
     });
 
     await runArrivalAlertCheck(dependencies);
     expect(sent).toHaveLength(1);
-    expect(await alerts.get(alertKey('alert-accepted-cas-failure'))).toMatchObject({ state: 'claimed' });
+    expect(await alerts.get(alertKey('alert-accepted-cas-failure'))).toMatchObject({ state: 'pending' });
 
-    now = new Date('2026-08-22T00:00:16.000Z');
     await runArrivalAlertCheck(dependencies);
-    expect(sent).toHaveLength(1);
-    expect(await alerts.get(alertKey('alert-accepted-cas-failure'))).toMatchObject({ state: 'claimed' });
-
-    now = new Date('2026-08-22T04:00:00.001Z');
-    await runArrivalAlertCheck(dependencies);
+    expect(sent).toHaveLength(2);
     expect(await alerts.get(alertKey('alert-accepted-cas-failure'))).toBeUndefined();
   });
 
-  it('does not reclaim a stale claimed reminder after its lease expires', async () => {
+  it('CAS-reclaims an expired claimed reminder and sends it once', async () => {
     const dependencies = setup();
     await alerts.set(alertKey('alert-stale-claim'), {
       ...alert('alert-stale-claim', 'M2', 1, 1),
@@ -342,7 +342,7 @@ describe('minute arrival alert checker', () => {
 
     await runArrivalAlertCheck(dependencies);
 
-    expect(sent).toHaveLength(0);
-    expect(await alerts.get(alertKey('alert-stale-claim'))).toMatchObject({ state: 'claimed' });
+    expect(sent).toHaveLength(1);
+    expect(await alerts.get(alertKey('alert-stale-claim'))).toBeUndefined();
   });
 });

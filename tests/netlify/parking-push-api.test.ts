@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createPushSubscriptionsHandler } from '../../netlify/functions/push-subscriptions';
 import { createParkingPushAlertsHandler } from '../../netlify/functions/push-parking-alerts';
+import { runParkingAlertCheck } from '../../netlify/functions/check-parking-alerts';
 import type {
   JsonBlobStore,
   PushApiDependencies,
@@ -275,5 +276,122 @@ describe('parking push alert API', () => {
     expect(racingPost.status).toBe(409);
     releaseResolve();
     expect((await deleting).status).toBe(200);
+  });
+
+  it('lets an in-flight DELETE reservation cancel before the checker can send', async () => {
+    const subscriptionsHandler = createPushSubscriptionsHandler(dependencies);
+    const response = await subscriptionsHandler(request('/api/push/subscriptions', 'POST', {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/parking-delete-checker-race',
+      keys: { p256dh: 'public-key', auth: 'auth-secret' },
+    }), {} as PushContext);
+    const identity = await response.json() as { subscriptionId: string; alertToken: string };
+    const handler = createParkingPushAlertsHandler(dependencies);
+    const headers = auth(identity);
+    const created = await handler(request('/api/push/parking-alerts', 'POST', {
+      parkingId: '42', parkingName: '甲停車場', threshold: 10,
+    }, headers), context());
+    const summary = await created.json() as { id: string };
+    const storageKey = `${identity.subscriptionId}/${summary.id}`;
+    let enteredResolve!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+    let releaseResolve!: () => void;
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    const getAlert = alerts.get.bind(alerts);
+    let blocked = false;
+    vi.spyOn(alerts, 'get').mockImplementation(async (key) => {
+      if (key === storageKey && !blocked) {
+        blocked = true;
+        enteredResolve();
+        await release;
+      }
+      return getAlert(key);
+    });
+
+    const deleting = handler(
+      request(`/api/push/parking-alerts/${summary.id}`, 'DELETE', undefined, headers),
+      context(summary.id),
+    );
+    await entered;
+    const sender = vi.fn(async () => undefined);
+    await runParkingAlertCheck({
+      stores: dependencies.stores,
+      now: () => new Date(now),
+      fetchParking: vi.fn(async () => ({
+        updatedAt: now.toISOString(), stale: false,
+        facilities: [{
+          id: '42', name: '甲停車場', location: '澳門', entrance: null, latitude: null, longitude: null,
+          spaces: { car: 1, motorcycle: null, electricCar: null, electricMotorcycle: null, accessible: null },
+          updatedAt: now.toISOString(), suspended: false,
+        }],
+      })),
+      sendNotification: sender,
+    });
+
+    expect(sender).not.toHaveBeenCalled();
+    releaseResolve();
+    expect((await deleting).status).toBe(200);
+    expect(await alerts.get(storageKey)).toBeUndefined();
+  });
+
+  it('serializes replacement with the checker and sends only the replacement threshold once', async () => {
+    const subscriptionsHandler = createPushSubscriptionsHandler(dependencies);
+    const response = await subscriptionsHandler(request('/api/push/subscriptions', 'POST', {
+      endpoint: 'https://fcm.googleapis.com/fcm/send/parking-replace-checker-race',
+      keys: { p256dh: 'public-key', auth: 'auth-secret' },
+    }), {} as PushContext);
+    const identity = await response.json() as { subscriptionId: string; alertToken: string };
+    const handler = createParkingPushAlertsHandler(dependencies);
+    const headers = auth(identity);
+    const created = await handler(request('/api/push/parking-alerts', 'POST', {
+      parkingId: '42', parkingName: '甲停車場', threshold: 10,
+    }, headers), context());
+    const summary = await created.json() as { id: string };
+    const storageKey = `${identity.subscriptionId}/${summary.id}`;
+    let enteredResolve!: () => void;
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+    let releaseResolve!: () => void;
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    const getAlert = alerts.get.bind(alerts);
+    let blocked = false;
+    vi.spyOn(alerts, 'get').mockImplementation(async (key) => {
+      if (key === storageKey && !blocked) {
+        blocked = true;
+        enteredResolve();
+        await release;
+      }
+      return getAlert(key);
+    });
+    const replacing = handler(request('/api/push/parking-alerts', 'POST', {
+      parkingId: '42', parkingName: '甲停車場', threshold: 7,
+    }, headers), context());
+    await entered;
+    let freeSpaces = 8;
+    const sender = vi.fn(async () => undefined);
+    const checker = () => runParkingAlertCheck({
+      stores: dependencies.stores,
+      now: () => new Date(now),
+      fetchParking: vi.fn(async () => ({
+        updatedAt: now.toISOString(), stale: false,
+        facilities: [{
+          id: '42', name: '甲停車場', location: '澳門', entrance: null, latitude: null, longitude: null,
+          spaces: { car: freeSpaces, motorcycle: null, electricCar: null, electricMotorcycle: null, accessible: null },
+          updatedAt: now.toISOString(), suspended: false,
+        }],
+      })),
+      sendNotification: sender,
+    });
+
+    await checker();
+    expect(sender).not.toHaveBeenCalled();
+    releaseResolve();
+    expect((await replacing).status).toBe(201);
+    expect(await alerts.get(storageKey)).toMatchObject({ threshold: 7, state: 'pending' });
+    expect(await alerts.list(`${identity.subscriptionId}/`)).toHaveLength(1);
+
+    await checker();
+    expect(sender).not.toHaveBeenCalled();
+    freeSpaces = 7;
+    await checker();
+    expect(sender).toHaveBeenCalledTimes(1);
   });
 });

@@ -141,6 +141,70 @@ describe('minute parking alert checker', () => {
     expect(expiredResult.expired).toBe(1);
   });
 
+  it('releases a generic push failure so the next checker run can retry', async () => {
+    const sender = vi.fn()
+      .mockRejectedValueOnce({ unexpected: true })
+      .mockResolvedValueOnce(undefined);
+    const dependencies = setup(vi.fn(async () => snapshot([facility('42', 1)])), sender);
+    await alerts.set(key('generic-retry'), alert('generic-retry', '42', 2));
+
+    await runParkingAlertCheck(dependencies);
+    expect(await alerts.get(key('generic-retry'))).toMatchObject({ state: 'pending' });
+
+    await runParkingAlertCheck(dependencies);
+    expect(sender).toHaveBeenCalledTimes(2);
+    expect(await alerts.get(key('generic-retry'))).toBeUndefined();
+  });
+
+  it('treats a stale parking snapshot as transient without claiming or sending', async () => {
+    const sender = vi.fn(async () => undefined);
+    const dependencies = setup(vi.fn(async () => snapshot([facility('42', 1)], true)), sender);
+    await alerts.set(key('stale-snapshot'), alert('stale-snapshot', '42', 2));
+
+    const result = await runParkingAlertCheck(dependencies);
+
+    expect(result.retained).toBe(1);
+    expect(result.sent).toBe(0);
+    expect(sender).not.toHaveBeenCalled();
+    expect(await alerts.get(key('stale-snapshot'))).toMatchObject({ state: 'pending' });
+  });
+
+  it('CAS-reclaims an expired claimed parking alert and sends it once', async () => {
+    const dependencies = setup(vi.fn(async () => snapshot([facility('42', 1)])));
+    await alerts.set(key('expired-claim'), {
+      ...alert('expired-claim', '42', 2),
+      state: 'claimed',
+      claimId: 'expired-claim-id',
+      claimExpiresAt: '2026-08-21T23:59:59.000Z',
+    });
+
+    await runParkingAlertCheck(dependencies);
+
+    expect(sent).toHaveLength(1);
+    expect(await alerts.get(key('expired-claim'))).toBeUndefined();
+  });
+
+  it('releases the claim so a delivered CAS failure can retry on the next run', async () => {
+    const dependencies = setup(vi.fn(async () => snapshot([facility('42', 1)])));
+    await alerts.set(key('delivered-cas-retry'), alert('delivered-cas-retry', '42', 2));
+    const setIfMatch = alerts.setIfMatch.bind(alerts);
+    let failDelivered = true;
+    vi.spyOn(alerts, 'setIfMatch').mockImplementation(async (storageKey, value, etag) => {
+      if (value.state === 'delivered' && failDelivered) {
+        failDelivered = false;
+        return false;
+      }
+      return setIfMatch(storageKey, value, etag);
+    });
+
+    await runParkingAlertCheck(dependencies);
+    expect(await alerts.get(key('delivered-cas-retry'))).toMatchObject({ state: 'pending' });
+
+    await runParkingAlertCheck(dependencies);
+    expect(sent).toHaveLength(2);
+    expect(await alerts.get(key('delivered-cas-retry'))).toBeUndefined();
+  });
+
   it.each([404, 410])('removes the subscription and its alerts on provider %s', async (statusCode) => {
     const sender = vi.fn(async () => { throw { statusCode }; });
     const dependencies = setup(vi.fn(async () => snapshot([facility('42', 1)])), sender);

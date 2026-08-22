@@ -120,8 +120,10 @@ export const PUSH_RATE_LIMIT_MAX_TRACKED_KEYS = REALTIME_RATE_LIMIT_MAX_TRACKED_
 export const DEFAULT_GLOBAL_SUBSCRIPTION_LIMIT = 10_000;
 export const DEFAULT_STALE_SUBSCRIPTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const DEFAULT_MAX_STALE_CLEANUP = 100;
+export const MAX_LEGACY_SUBSCRIPTION_SCAN = 100;
 export const GLOBAL_SUBSCRIPTION_ADMISSION_KEY = '__global-subscription-admission__';
 export const GLOBAL_SUBSCRIPTION_ADMISSION_TTL_MS = 5 * 60 * 1_000;
+export const PUSH_MUTATION_RESERVATION_TTL_MS = 15_000;
 
 export interface PushReservationLease {
   owner: string;
@@ -165,6 +167,51 @@ export function deadSubscriptionCleanupStore(stores: PushStores): JsonBlobStore<
 
 export function deadSubscriptionCleanupKey(subscriptionId: string): string {
   return subscriptionId;
+}
+
+export async function acquirePushMutationReservation(
+  store: JsonBlobStore<PushReservation>,
+  subscriptionId: string,
+  now: Date,
+  randomizer: (size: number) => Buffer = randomBytes,
+): Promise<PushReservationLease | undefined> {
+  const owner = makeRandomId(randomizer);
+  const next: PushReservation = {
+    id: subscriptionId,
+    subscriptionId,
+    owner,
+    expiresAt: new Date(now.getTime() + PUSH_MUTATION_RESERVATION_TTL_MS).toISOString(),
+  };
+  const existing = await store.getWithMetadata(subscriptionId);
+  if (existing === undefined) {
+    if (!await store.setIfNew(subscriptionId, next)) return undefined;
+  } else {
+    const parsed = PushReservationSchema.safeParse(existing.value);
+    const expiresAt = parsed.success ? Date.parse(parsed.data.expiresAt) : Number.NaN;
+    if (Number.isFinite(expiresAt) && expiresAt > now.getTime()) return undefined;
+    if (!existing.etag || !await store.setIfMatch(subscriptionId, next, existing.etag)) return undefined;
+  }
+  const stored = await store.getWithMetadata(subscriptionId);
+  const parsed = stored === undefined ? undefined : PushReservationSchema.safeParse(stored.value);
+  return stored?.etag && parsed?.success && parsed.data.owner === owner
+    ? { owner, etag: stored.etag }
+    : undefined;
+}
+
+export async function releasePushMutationReservation(
+  store: JsonBlobStore<PushReservation>,
+  subscriptionId: string,
+  lease: PushReservationLease,
+  now: Date,
+): Promise<void> {
+  const current = await store.getWithMetadata(subscriptionId);
+  if (!current?.etag) return;
+  const parsed = PushReservationSchema.safeParse(current.value);
+  if (!parsed.success || parsed.data.owner !== lease.owner) return;
+  await store.setIfMatch(subscriptionId, {
+    ...parsed.data,
+    expiresAt: new Date(now.getTime() - 1).toISOString(),
+  }, current.etag);
 }
 
 export function getPushRateLimiter(): RealtimeRateLimiter {
@@ -403,7 +450,8 @@ export async function authenticateSubscription(
     return subscription && equalHash(subscription.tokenHash, tokenHash) ? subscription : undefined;
   }
 
-  for (const key of await stores.subscriptions.list()) {
+  const legacyKeys = (await stores.subscriptions.list()).slice(0, MAX_LEGACY_SUBSCRIPTION_SCAN);
+  for (const key of legacyKeys) {
     const subscription = await stores.subscriptions.get(key);
     if (subscription && equalHash(subscription.tokenHash, tokenHash)) {
       return subscription;

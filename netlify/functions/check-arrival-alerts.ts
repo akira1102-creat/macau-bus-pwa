@@ -19,10 +19,13 @@ import {
   type StoredSubscription,
 } from './_shared/push-contract';
 import {
+  acquirePushMutationReservation,
   deleteSubscriptionAndAlerts,
   getDefaultPushDependencies,
   makeRandomId,
+  releasePushMutationReservation,
   type PushStores,
+  type PushReservationLease,
 } from './_shared/push-store';
 import type { CatalogRepository } from '../../src/data/catalog-repository';
 
@@ -82,11 +85,6 @@ function pushStatus(error: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
-function isTransientPushFailure(error: unknown): boolean {
-  const status = pushStatus(error);
-  return status === 408 || status === 425 || status === 429 || (status !== undefined && status >= 500);
-}
-
 function asBuses(value: RealtimeBus[] | RealtimeRouteResponse): RealtimeBus[] {
   return Array.isArray(value) ? value : value.buses;
 }
@@ -122,13 +120,15 @@ function notificationBody(
 
 async function claimAlert(
   alertId: string,
+  expected: StoredAlert,
   dependencies: ArrivalAlertCheckDependencies,
   now: Date,
-): Promise<string | undefined> {
+): Promise<{ alert: StoredAlert; claimId: string } | undefined> {
   const current = await dependencies.stores.alerts.getWithMetadata(alertId);
   if (!current?.etag) return undefined;
   const parsed = StoredAlertSchema.safeParse(current.value);
-  if (!parsed.success || parsed.data.state === 'delivered' || parsed.data.state === 'claimed') return undefined;
+  if (!parsed.success || parsed.data.state === 'delivered' || parsed.data.state === 'claimed'
+    || !sameAlertVersion(parsed.data, expected)) return undefined;
   const claimId = makeRandomId(dependencies.randomBytes ?? randomBytes);
   const claimed = StoredAlertSchema.parse({
     ...parsed.data,
@@ -137,8 +137,51 @@ async function claimAlert(
     claimExpiresAt: new Date(now.getTime() + CLAIM_TTL_MS).toISOString(),
   });
   return await dependencies.stores.alerts.setIfMatch(alertId, claimed, current.etag)
-    ? claimId
+    ? { alert: claimed, claimId }
     : undefined;
+}
+
+function sameAlertVersion(left: StoredAlert, right: StoredAlert): boolean {
+  return left.id === right.id
+    && left.subscriptionId === right.subscriptionId
+    && left.routeId === right.routeId
+    && left.direction === right.direction
+    && left.targetStopId === right.targetStopId
+    && left.targetStopIndex === right.targetStopIndex
+    && left.threshold === right.threshold
+    && left.createdAt === right.createdAt
+    && left.expiresAt === right.expiresAt;
+}
+
+async function reclaimExpiredAlertClaim(
+  alertId: string,
+  dependencies: ArrivalAlertCheckDependencies,
+  now: Date,
+): Promise<StoredAlert | undefined> {
+  const current = await dependencies.stores.alerts.getWithMetadata(alertId);
+  if (!current?.etag) return undefined;
+  const parsed = StoredAlertSchema.safeParse(current.value);
+  const claimExpiresAt = parsed.success && parsed.data.claimExpiresAt
+    ? Date.parse(parsed.data.claimExpiresAt)
+    : Number.NaN;
+  if (!parsed.success || parsed.data.state !== 'claimed'
+    || !Number.isFinite(claimExpiresAt) || claimExpiresAt > now.getTime()) return undefined;
+  const pending = StoredAlertSchema.parse({ ...parsed.data, state: 'pending' });
+  delete pending.claimId;
+  delete pending.claimExpiresAt;
+  return await dependencies.stores.alerts.setIfMatch(alertId, pending, current.etag)
+    ? pending
+    : undefined;
+}
+
+async function confirmAlertClaim(
+  alertId: string,
+  claimId: string,
+  dependencies: ArrivalAlertCheckDependencies,
+): Promise<boolean> {
+  const current = await dependencies.stores.alerts.get(alertId);
+  const parsed = current === undefined ? undefined : StoredAlertSchema.safeParse(current);
+  return parsed?.success === true && parsed.data.state === 'claimed' && parsed.data.claimId === claimId;
 }
 
 async function markAlertDelivered(
@@ -277,26 +320,37 @@ export async function runArrivalAlertCheck(
       result.deleted += 1;
       continue;
     }
-    if (parsed.data.state === 'delivered') {
+    let activeAlert = parsed.data;
+    if (activeAlert.state === 'delivered') {
       result.retained += 1;
       continue;
     }
-    if (parsed.data.state === 'claimed') {
-      result.retained += 1;
-      continue;
+    if (activeAlert.state === 'claimed') {
+      try {
+        const reclaimed = await reclaimExpiredAlertClaim(key, dependencies, now);
+        if (!reclaimed) {
+          result.retained += 1;
+          continue;
+        }
+        activeAlert = reclaimed;
+      } catch {
+        result.errors += 1;
+        result.retained += 1;
+        continue;
+      }
     }
     result.checked += 1;
-    let subscription = subscriptionCache.get(parsed.data.subscriptionId);
-    if (subscription === undefined && !subscriptionCache.has(parsed.data.subscriptionId)) {
-      subscription = await dependencies.stores.subscriptions.get(parsed.data.subscriptionId);
-      subscriptionCache.set(parsed.data.subscriptionId, subscription);
+    let subscription = subscriptionCache.get(activeAlert.subscriptionId);
+    if (subscription === undefined && !subscriptionCache.has(activeAlert.subscriptionId)) {
+      subscription = await dependencies.stores.subscriptions.get(activeAlert.subscriptionId);
+      subscriptionCache.set(activeAlert.subscriptionId, subscription);
     }
     if (!subscription) {
       await dependencies.stores.alerts.delete(key);
       result.deleted += 1;
       continue;
     }
-    pending.push({ storageKey: key, alert: parsed.data, subscription });
+    pending.push({ storageKey: key, alert: activeAlert, subscription });
   }
 
   if (pending.length === 0) return result;
@@ -349,74 +403,118 @@ export async function runArrivalAlertCheck(
         continue;
       }
 
-      let claimId: string | undefined;
+      let lease: PushReservationLease | undefined;
       try {
-        claimId = await claimAlert(item.storageKey, dependencies, now);
+        lease = await acquirePushMutationReservation(
+          dependencies.stores.reservations,
+          item.subscription.id,
+          now,
+          dependencies.randomBytes ?? randomBytes,
+        );
       } catch {
         result.errors += 1;
         result.retained += 1;
         continue;
       }
-      if (!claimId) {
+      if (!lease) {
         result.retained += 1;
         continue;
       }
-
-      const payload = JSON.stringify({
-        title: '到站提醒',
-        body: notificationBody(item.alert, candidate),
-        route: item.alert.routeId,
-        direction: item.alert.direction,
-        stop: item.alert.targetStopId,
-        plate: candidate.plate,
-        remainingStops: candidate.remainingStops,
-        url: deepLink(
-          appUrl(dependencies),
-          item.alert.routeId,
-          item.alert.direction,
-        ),
-      });
       try {
-        await dependencies.sendNotification(item.subscription, payload);
-      } catch (error) {
-        const status = pushStatus(error);
-        if (status === 404 || status === 410) {
-          deadSubscriptions.add(item.subscription.id);
-          result.deadSubscriptions += 1;
-          await deleteSubscriptionAndAlerts(item.subscription.id, dependencies.stores);
-          result.deleted += group.alerts.filter((candidateAlert) => candidateAlert.subscription.id === item.subscription.id).length;
-        } else {
-          if (isTransientPushFailure(error)) {
-            try {
-              await releaseAlertClaim(item.storageKey, claimId, dependencies);
-            } catch {
-              // A failed release leaves the claim terminal until alert expiry.
-            }
-          }
-          result.errors += 1;
-          result.retained += 1;
-        }
-        continue;
-      }
-
-      try {
-        const delivered = await markAlertDelivered(item.storageKey, claimId, dependencies, now);
-        if (!delivered) {
+        let claimed: Awaited<ReturnType<typeof claimAlert>>;
+        try {
+          claimed = await claimAlert(item.storageKey, item.alert, dependencies, now);
+        } catch {
           result.errors += 1;
           result.retained += 1;
           continue;
         }
-        result.sent += 1;
+        if (!claimed) {
+          result.retained += 1;
+          continue;
+        }
         try {
-          await dependencies.stores.alerts.delete(item.storageKey);
-          result.deleted += 1;
+          if (!await confirmAlertClaim(item.storageKey, claimed.claimId, dependencies)) {
+            await releaseAlertClaim(item.storageKey, claimed.claimId, dependencies);
+            result.retained += 1;
+            continue;
+          }
         } catch {
+          try { await releaseAlertClaim(item.storageKey, claimed.claimId, dependencies); } catch { /* next run can reclaim */ }
+          result.errors += 1;
+          result.retained += 1;
+          continue;
+        }
+
+        const payload = JSON.stringify({
+          title: '到站提醒',
+          body: notificationBody(claimed.alert, candidate),
+          route: claimed.alert.routeId,
+          direction: claimed.alert.direction,
+          stop: claimed.alert.targetStopId,
+          plate: candidate.plate,
+          remainingStops: candidate.remainingStops,
+          url: deepLink(
+            appUrl(dependencies),
+            claimed.alert.routeId,
+            claimed.alert.direction,
+          ),
+        });
+        try {
+          await dependencies.sendNotification(item.subscription, payload);
+        } catch (error) {
+          const status = pushStatus(error);
+          if (status === 404 || status === 410) {
+            deadSubscriptions.add(item.subscription.id);
+            result.deadSubscriptions += 1;
+            try {
+              await deleteSubscriptionAndAlerts(item.subscription.id, dependencies.stores);
+              result.deleted += group.alerts.filter((candidateAlert) => candidateAlert.subscription.id === item.subscription.id).length;
+            } catch {
+              try { await releaseAlertClaim(item.storageKey, claimed.claimId, dependencies); } catch { /* next run can reclaim */ }
+              result.errors += 1;
+              result.retained += 1;
+            }
+          } else {
+            try { await releaseAlertClaim(item.storageKey, claimed.claimId, dependencies); } catch { /* next run can reclaim */ }
+            result.errors += 1;
+            result.retained += 1;
+          }
+          continue;
+        }
+
+        try {
+          const delivered = await markAlertDelivered(item.storageKey, claimed.claimId, dependencies, now);
+          if (!delivered) {
+            try { await releaseAlertClaim(item.storageKey, claimed.claimId, dependencies); } catch { /* next run can reclaim */ }
+            result.errors += 1;
+            result.retained += 1;
+            continue;
+          }
+          result.sent += 1;
+          try {
+            await dependencies.stores.alerts.delete(item.storageKey);
+            result.deleted += 1;
+          } catch {
+            result.errors += 1;
+            result.retained += 1;
+          }
+        } catch {
+          try { await releaseAlertClaim(item.storageKey, claimed.claimId, dependencies); } catch { /* next run can reclaim */ }
           result.errors += 1;
           result.retained += 1;
         }
-      } catch {
-        result.errors += 1;
-        result.retained += 1;
+      } finally {
+        try {
+          await releasePushMutationReservation(
+            dependencies.stores.reservations,
+            item.subscription.id,
+            lease,
+            now,
+          );
+        } catch {
+          // The lease expires and can be reclaimed by a later API/checker run.
+        }
       }
     }
   }
