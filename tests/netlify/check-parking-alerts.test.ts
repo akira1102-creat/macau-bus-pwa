@@ -2,20 +2,38 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { config as checkerConfig, runParkingAlertCheck, type ParkingAlertCheckDependencies } from '../../netlify/functions/check-parking-alerts';
 import type { ParkingSnapshot } from '../../shared/parking-contract';
-import type { JsonBlobStore, PushReservation, StoredParkingAlert, StoredSubscription } from '../../netlify/functions/_shared/push-store';
+import type { DeadSubscriptionCleanup, JsonBlobStore, PushReservation, StoredParkingAlert, StoredSubscription } from '../../netlify/functions/_shared/push-store';
 
 class MemoryBlobStore<T extends { id: string }> implements JsonBlobStore<T> {
   readonly values = new Map<string, T>();
+  failNextDelete: Error | undefined;
+  failNextSet: Error | undefined;
   private readonly versions = new Map<string, number>();
   async get(key: string): Promise<T | undefined> { return this.values.get(key); }
   async getWithMetadata(key: string): Promise<{ value: T; etag?: string } | undefined> {
     const value = this.values.get(key);
     return value === undefined ? undefined : { value, etag: String(this.versions.get(key) ?? 0) };
   }
-  async set(key: string, value: T): Promise<void> { this.values.set(key, value); this.versions.set(key, (this.versions.get(key) ?? 0) + 1); }
+  async set(key: string, value: T): Promise<void> {
+    if (this.failNextSet) {
+      const failure = this.failNextSet;
+      this.failNextSet = undefined;
+      throw failure;
+    }
+    this.values.set(key, value);
+    this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
+  }
   async setIfNew(key: string, value: T): Promise<boolean> { if (this.values.has(key)) return false; await this.set(key, value); return true; }
   async setIfMatch(key: string, value: T, etag: string): Promise<boolean> { if (!this.values.has(key) || String(this.versions.get(key) ?? 0) !== etag) return false; await this.set(key, value); return true; }
-  async delete(key: string): Promise<void> { this.values.delete(key); this.versions.delete(key); }
+  async delete(key: string): Promise<void> {
+    if (this.failNextDelete) {
+      const failure = this.failNextDelete;
+      this.failNextDelete = undefined;
+      throw failure;
+    }
+    this.values.delete(key);
+    this.versions.delete(key);
+  }
   async list(prefix?: string): Promise<string[]> { return [...this.values.keys()].filter((key) => prefix === undefined || key.startsWith(prefix)); }
 }
 
@@ -32,6 +50,7 @@ let subscriptions: MemoryBlobStore<StoredSubscription>;
 let alerts: MemoryBlobStore<StoredParkingAlert>;
 let reservations: MemoryBlobStore<PushReservation>;
 let parkingReservations: MemoryBlobStore<PushReservation>;
+let deadCleanup: MemoryBlobStore<DeadSubscriptionCleanup>;
 let now: Date;
 let sent: Array<{ payload: string; subscriptionId: string }>;
 
@@ -62,10 +81,11 @@ function setup(fetchParking: ParkingAlertCheckDependencies['fetchParking'] = vi.
   alerts = new MemoryBlobStore<StoredParkingAlert>();
   reservations = new MemoryBlobStore<PushReservation>();
   parkingReservations = new MemoryBlobStore<PushReservation>();
+  deadCleanup = new MemoryBlobStore<DeadSubscriptionCleanup>();
   sent = [];
   void subscriptions.set(subscription.id, subscription);
   return {
-    stores: { subscriptions, alerts: new MemoryBlobStore(), reservations, parkingAlerts: alerts, parkingReservations },
+    stores: { subscriptions, alerts: new MemoryBlobStore(), reservations, parkingAlerts: alerts, parkingReservations, deadSubscriptionCleanup: deadCleanup },
     now: () => new Date(now),
     fetchParking,
     sendNotification: async (value, payload) => { sent.push({ subscriptionId: value.id, payload }); await sendNotification(value, payload); },
@@ -205,8 +225,57 @@ describe('minute parking alert checker', () => {
     expect(await subscriptions.get(subscription.id)).toBeDefined();
 
     const second = await runParkingAlertCheck(dependencies);
-    expect(second.deadSubscriptions).toBe(1);
+    expect(second.deadSubscriptions).toBe(0);
     expect(await alerts.get(key('dead-retry'))).toBeUndefined();
     expect(await subscriptions.get(subscription.id)).toBeUndefined();
+  });
+
+  it('keeps a dead-subscription marker when the final subscription delete fails, then retries with zero alerts', async () => {
+    const fetchParking = vi.fn(async () => snapshot([facility('42', 1)]));
+    const sender = vi.fn(async () => { throw { statusCode: 410 }; });
+    const dependencies = setup(fetchParking, sender);
+    await alerts.set(key('dead-marker'), alert('dead-marker', '42', 2));
+    subscriptions.failNextDelete = new Error('subscription delete failed');
+
+    const first = await runParkingAlertCheck(dependencies);
+
+    expect(first.errors).toBe(1);
+    expect(await alerts.list()).toHaveLength(0);
+    expect(await subscriptions.get(subscription.id)).toBeDefined();
+    expect(await deadCleanup.get(subscription.id)).toBeDefined();
+
+    const second = await runParkingAlertCheck(dependencies);
+
+    expect(second.errors).toBe(0);
+    expect(await deadCleanup.get(subscription.id)).toBeUndefined();
+    expect(await subscriptions.get(subscription.id)).toBeUndefined();
+    expect(fetchParking).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps processing other alerts when the dead-subscription marker store fails', async () => {
+    const secondSubscription: StoredSubscription = {
+      ...subscription,
+      id: 'subscription-marker-2',
+      endpoint: 'https://fcm.googleapis.com/fcm/send/marker-2',
+    };
+    const sender = vi.fn()
+      .mockRejectedValueOnce({ statusCode: 410 })
+      .mockResolvedValueOnce(undefined);
+    const dependencies = setup(vi.fn(async () => snapshot([facility('42', 1), facility('43', 1)])), sender);
+    await subscriptions.set(secondSubscription.id, secondSubscription);
+    await alerts.set(key('dead-marker-store'), alert('dead-marker-store', '42', 2));
+    await alerts.set(`${secondSubscription.id}/healthy-marker-store`, {
+      ...alert('healthy-marker-store', '43', 2),
+      id: 'healthy-marker-store',
+      subscriptionId: secondSubscription.id,
+    });
+    deadCleanup.failNextSet = new Error('marker store unavailable');
+
+    const result = await runParkingAlertCheck(dependencies);
+
+    expect(result.errors).toBeGreaterThanOrEqual(1);
+    expect(result.sent).toBe(1);
+    expect(await alerts.get(`${secondSubscription.id}/healthy-marker-store`)).toBeUndefined();
+    expect(await subscriptions.get(secondSubscription.id)).toBeDefined();
   });
 });

@@ -14,6 +14,7 @@ import {
   StoredParkingAlertSchema,
   StoredAlertSchema,
   type StoredParkingAlert,
+  type DeadSubscriptionCleanup,
   StoredSubscriptionSchema,
   type PushReservation,
   type StoredAlert,
@@ -28,6 +29,7 @@ export type {
   PushIdentity,
   PushReservation,
   PushSubscriptionInput,
+  DeadSubscriptionCleanup,
   StoredAlert,
   StoredSubscription,
   StoredParkingAlert,
@@ -92,6 +94,8 @@ export interface PushStores {
   /** Separate namespace for one-shot parking alerts; bus alert storage stays untouched. */
   parkingAlerts?: JsonBlobStore<StoredParkingAlert>;
   parkingReservations?: JsonBlobStore<PushReservation>;
+  /** Separate retry queue for provider-invalid subscriptions. */
+  deadSubscriptionCleanup?: JsonBlobStore<DeadSubscriptionCleanup>;
 }
 
 export interface PushApiDependencies {
@@ -155,6 +159,14 @@ export function parkingReservationsStore(stores: PushStores): JsonBlobStore<Push
   return stores.parkingReservations;
 }
 
+export function deadSubscriptionCleanupStore(stores: PushStores): JsonBlobStore<DeadSubscriptionCleanup> | undefined {
+  return stores.deadSubscriptionCleanup;
+}
+
+export function deadSubscriptionCleanupKey(subscriptionId: string): string {
+  return subscriptionId;
+}
+
 export function getPushRateLimiter(): RealtimeRateLimiter {
   if (!defaultRateLimiter) {
     defaultRateLimiter = new RealtimeRateLimiter({
@@ -191,6 +203,10 @@ export function getPushStores(): PushStores {
       })),
       parkingReservations: new NetlifyJsonBlobStore<PushReservation>(getStore({
         name: 'parking-alert-reservations',
+        consistency: 'strong',
+      })),
+      deadSubscriptionCleanup: new NetlifyJsonBlobStore<DeadSubscriptionCleanup>(getStore({
+        name: 'dead-subscription-cleanup',
         consistency: 'strong',
       })),
     };

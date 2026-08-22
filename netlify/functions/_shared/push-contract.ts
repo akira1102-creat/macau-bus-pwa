@@ -112,6 +112,18 @@ export const PushReservationSchema = z.object({
 });
 export type PushReservation = z.infer<typeof PushReservationSchema>;
 
+/**
+ * A bounded retry record for provider-invalid subscriptions.  Keep this
+ * intentionally independent from push capabilities and alert payloads: the
+ * checker only needs the subscription identity and when the retry was queued.
+ */
+export const DeadSubscriptionCleanupSchema = z.object({
+  id: z.string().trim().min(1),
+  subscriptionId: z.string().trim().min(1),
+  createdAt: z.string().datetime({ offset: true }),
+});
+export type DeadSubscriptionCleanup = z.infer<typeof DeadSubscriptionCleanupSchema>;
+
 export const StoredAlertSchema = ArrivalAlertSummarySchema.extend({
   subscriptionId: z.string().trim().min(1),
   state: z.enum(['pending', 'claimed', 'delivered']).optional(),

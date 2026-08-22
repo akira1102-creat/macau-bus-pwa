@@ -6,9 +6,18 @@ import webpush from 'web-push';
 import { ParkingSnapshotSchema, type ParkingFacility, type ParkingSnapshot } from '../../shared/parking-contract';
 import { getParkingRuntime } from '../../server/parking/runtime';
 import { readNetlifyEnv } from './_shared/env';
-import { getDefaultPushDependencies, makeRandomId, parkingAlertsStore, type PushStores, type StoredParkingAlert, type StoredSubscription } from './_shared/push-store';
-import { deleteSubscriptionAndAlerts } from './_shared/push-store';
-import { StoredParkingAlertSchema } from './_shared/push-contract';
+import {
+  deadSubscriptionCleanupKey,
+  deadSubscriptionCleanupStore,
+  deleteSubscriptionAndAlerts,
+  getDefaultPushDependencies,
+  makeRandomId,
+  parkingAlertsStore,
+  type PushStores,
+  type StoredParkingAlert,
+  type StoredSubscription,
+} from './_shared/push-store';
+import { DeadSubscriptionCleanupSchema, StoredParkingAlertSchema } from './_shared/push-contract';
 
 export type ParkingSnapshotFetcher = () => Promise<ParkingSnapshot>;
 export type ParkingNotificationSender = (subscription: StoredSubscription, payload: string) => Promise<unknown>;
@@ -39,6 +48,7 @@ interface PendingParkingAlert {
 }
 
 const CLAIM_TTL_MS = 15_000;
+const MAX_DEAD_SUBSCRIPTION_CLEANUPS_PER_RUN = 25;
 const DEFAULT_PUBLIC_APP_URL = 'https://akira1102-creat.github.io/macau-bus-pwa/';
 
 function currentDate(dependencies: Pick<ParkingAlertCheckDependencies, 'now'>): Date {
@@ -146,6 +156,78 @@ function pendingIsNewer(candidate: PendingParkingAlert, current: PendingParkingA
     || (candidateTime === currentTime && candidate.alert.id.localeCompare(current.alert.id) > 0);
 }
 
+async function markDeadSubscription(
+  subscriptionId: string,
+  dependencies: ParkingAlertCheckDependencies,
+  now: Date,
+  result: ParkingAlertCheckResult,
+): Promise<boolean> {
+  const markerStore = deadSubscriptionCleanupStore(dependencies.stores);
+  if (!markerStore) {
+    result.errors += 1;
+    return false;
+  }
+  const id = deadSubscriptionCleanupKey(subscriptionId);
+  try {
+    await markerStore.set(id, DeadSubscriptionCleanupSchema.parse({
+      id,
+      subscriptionId,
+      createdAt: now.toISOString(),
+    }));
+    return true;
+  } catch {
+    result.errors += 1;
+    return false;
+  }
+}
+
+async function retryDeadSubscriptionCleanups(
+  dependencies: ParkingAlertCheckDependencies,
+  result: ParkingAlertCheckResult,
+  skipKeys: ReadonlySet<string> = new Set(),
+): Promise<void> {
+  const markerStore = deadSubscriptionCleanupStore(dependencies.stores);
+  if (!markerStore) return;
+
+  let keys: string[];
+  try {
+    keys = (await markerStore.list()).slice(0, MAX_DEAD_SUBSCRIPTION_CLEANUPS_PER_RUN);
+  } catch {
+    result.errors += 1;
+    return;
+  }
+
+  for (const key of keys) {
+    if (skipKeys.has(key)) continue;
+    let value;
+    try {
+      value = await markerStore.get(key);
+    } catch {
+      result.errors += 1;
+      continue;
+    }
+    if (value === undefined) continue;
+    const parsed = DeadSubscriptionCleanupSchema.safeParse(value);
+    if (!parsed.success) {
+      result.errors += 1;
+      continue;
+    }
+    try {
+      await deleteSubscriptionAndAlerts(parsed.data.subscriptionId, dependencies.stores);
+    } catch {
+      // Keep the marker so a later scheduled run can resume the partial cleanup.
+      result.errors += 1;
+      continue;
+    }
+    try {
+      await markerStore.delete(key);
+    } catch {
+      // Cleanup succeeded, but retaining the marker makes deletion retry-safe.
+      result.errors += 1;
+    }
+  }
+}
+
 async function suppressDuplicate(
   duplicate: PendingParkingAlert,
   dependencies: ParkingAlertCheckDependencies,
@@ -205,6 +287,8 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
   const result: ParkingAlertCheckResult = { checked: 0, sent: 0, deleted: 0, expired: 0, retained: 0, deadSubscriptions: 0, errors: 0 };
   const now = currentDate(dependencies);
   const store = parkingAlertsStore(dependencies.stores);
+  const createdDeadMarkers = new Set<string>();
+  await retryDeadSubscriptionCleanups(dependencies, result);
   const pending: PendingParkingAlert[] = [];
   const claimedFacilities = new Set<string>();
   const subscriptionCache = new Map<string, StoredSubscription | undefined>();
@@ -264,7 +348,10 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
   }
   const deduplicatedPending = [...uniquePending.values()];
 
-  if (deduplicatedPending.length === 0) return result;
+  if (deduplicatedPending.length === 0) {
+    await retryDeadSubscriptionCleanups(dependencies, result, createdDeadMarkers);
+    return result;
+  }
 
   let snapshot: ParkingSnapshot;
   try {
@@ -314,9 +401,23 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
       if (status === 404 || status === 410) {
         deadSubscriptions.add(item.subscription.id);
         result.deadSubscriptions += 1;
+        const markerKey = deadSubscriptionCleanupKey(item.subscription.id);
+        const markerStored = await markDeadSubscription(item.subscription.id, dependencies, now, result);
+        if (markerStored) createdDeadMarkers.add(markerKey);
         try {
           await deleteSubscriptionAndAlerts(item.subscription.id, dependencies.stores);
           result.deleted += deduplicatedPending.filter((candidate) => candidate.subscription.id === item.subscription.id).length;
+          if (markerStored) {
+            const markerStore = deadSubscriptionCleanupStore(dependencies.stores);
+            if (markerStore) {
+              try {
+                await markerStore.delete(markerKey);
+              } catch {
+                // Leave the marker for the next run if clearing it fails.
+                result.errors += 1;
+              }
+            }
+          }
         } catch {
           // A dead provider must not abort the rest of the scheduled run.
           result.errors += 1;
@@ -355,6 +456,7 @@ export async function runParkingAlertCheck(dependencies: ParkingAlertCheckDepend
       result.retained += 1;
     }
   }
+  await retryDeadSubscriptionCleanups(dependencies, result, createdDeadMarkers);
   return result;
 }
 
