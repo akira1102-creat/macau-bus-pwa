@@ -191,6 +191,7 @@ describe('Netlify realtime function', () => {
   });
 
   it('maps timeout and other upstream failures to safe error bodies', async () => {
+    const logSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const timeoutFetcher = vi.fn(async () => { throw new DsatClientError('timeout'); });
     vi.stubGlobal('fetch', timeoutFetcher);
     resetNetlifyRuntimeForTests();
@@ -204,11 +205,17 @@ describe('Netlify realtime function', () => {
     const errorResponse = await realtimeHandler(errorRequest, errorContext);
 
     expect(timeoutResponse.status).toBe(504);
+    expect(timeoutResponse.headers.get('x-upstream-error-code')).toBe('timeout');
     expect(await timeoutResponse.json()).toEqual({ error: 'upstream-timeout' });
     expect(errorResponse.status).toBe(502);
+    expect(errorResponse.headers.get('x-upstream-error-code')).toBe('network');
     const errorBody = await errorResponse.json();
     expect(errorBody).toEqual({ error: 'upstream-error' });
     expect(JSON.stringify(errorBody)).not.toContain('upstream unavailable');
+    expect(logSpy.mock.calls).toEqual([
+      ['{"event":"dsat-request-failed","code":"timeout"}'],
+      ['{"event":"dsat-request-failed","code":"network"}'],
+    ]);
   });
 
   it('does not trust caller-controlled forwarded addresses for rate-limit identity', async () => {

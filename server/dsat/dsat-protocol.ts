@@ -27,11 +27,12 @@ function pad(value: number): string {
 }
 
 function localTimestamp(now: Date): { date: string; monthDay: string; hourMinute: string } {
-  const year = String(now.getFullYear());
-  const month = pad(now.getMonth() + 1);
-  const day = pad(now.getDate());
-  const hour = pad(now.getHours());
-  const minute = pad(now.getMinutes());
+  const macauTime = new Date(now.getTime() + (8 * 60 * 60 * 1_000));
+  const year = String(macauTime.getUTCFullYear());
+  const month = pad(macauTime.getUTCMonth() + 1);
+  const day = pad(macauTime.getUTCDate());
+  const hour = pad(macauTime.getUTCHours());
+  const minute = pad(macauTime.getUTCMinutes());
   return {
     date: `${year}${month}${day}${hour}${minute}`,
     monthDay: `${month}${day}`,

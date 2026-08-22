@@ -23,11 +23,20 @@ function clientKey(context: Context): string {
   return context.ip?.trim() || 'unknown-client';
 }
 
-function upstreamError(error: unknown): { status: number; body: { error: string } } {
+function upstreamError(
+  error: unknown,
+  requestId?: string,
+): { status: number; body: { error: string }; diagnosticCode: string } {
+  const diagnosticCode = error instanceof DsatClientError ? error.code : 'unknown';
+  console.error(JSON.stringify({
+    event: 'dsat-request-failed',
+    code: diagnosticCode,
+    ...(requestId ? { requestId } : {}),
+  }));
   if (error instanceof DsatClientError && error.code === 'timeout') {
-    return { status: 504, body: { error: 'upstream-timeout' } };
+    return { status: 504, body: { error: 'upstream-timeout' }, diagnosticCode };
   }
-  return { status: 502, body: { error: 'upstream-error' } };
+  return { status: 502, body: { error: 'upstream-error' }, diagnosticCode };
 }
 
 export default async function realtimeHandler(request: Request, context: Context): Promise<Response> {
@@ -84,8 +93,10 @@ export default async function realtimeHandler(request: Request, context: Context
       stale: result.stale,
     });
   } catch (error) {
-    const mapped = upstreamError(error);
-    return jsonResponse(request, mapped.body, mapped.status);
+    const mapped = upstreamError(error, context.requestId);
+    return jsonResponse(request, mapped.body, mapped.status, {
+      'X-Upstream-Error-Code': mapped.diagnosticCode,
+    });
   }
 }
 

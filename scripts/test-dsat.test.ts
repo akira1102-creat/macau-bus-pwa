@@ -36,7 +36,8 @@ describe('DSAT probe request', () => {
     const request = buildDsatProbeRequest({
       route: '1',
       direction: 0,
-      now: new Date(2026, 7, 21, 12, 34, 56),
+      // 12:34 in Macau (UTC+8). The token must be identical on UTC hosts.
+      now: new Date('2026-08-21T04:34:56.000Z'),
     });
 
     expect(request.body).toBe(
