@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { parseRoute, routeUrl } from './router';
+import { getNavigationTabs, parseRoute, routeUrl } from './router';
 
 describe('app route direction navigation', () => {
   afterEach(() => {
@@ -21,5 +21,31 @@ describe('app route direction navigation', () => {
     const parsed = parseRoute(new URL('https://example.test/?tab=routes&route=1&direction=2') as unknown as Location);
 
     expect(parsed).toEqual({ tab: 'routes', routeId: '1' });
+  });
+
+  it('parses parking list, search and detail deep links without changing bus routes', () => {
+    expect(parseRoute(new URL('https://example.test/?mode=parking&tab=search&q=%E6%B0%B4%E5%9D%91') as unknown as Location)).toEqual({
+      mode: 'parking',
+      tab: 'search',
+      query: '水坑',
+    });
+    expect(parseRoute(new URL('https://example.test/?mode=parking&tab=detail&parking=42') as unknown as Location)).toEqual({
+      mode: 'parking',
+      tab: 'detail',
+      parkingId: '42',
+    });
+    expect(parseRoute(new URL('https://example.test/?tab=routes&route=1&direction=0') as unknown as Location)).toEqual({
+      tab: 'routes',
+      routeId: '1',
+      directionId: 0,
+    });
+  });
+
+  it('round-trips a parking detail URL and exposes exact mode navigation sets', () => {
+    const parkingRoute = { mode: 'parking' as const, tab: 'detail' as const, parkingId: '42' };
+    window.history.replaceState(null, '', '/macau-bus-pwa/');
+    expect(routeUrl(parkingRoute)).toBe('/macau-bus-pwa/?mode=parking&tab=detail&parking=42');
+    expect(getNavigationTabs('bus')).toEqual(['nearby', 'routes', 'map', 'favorites', 'settings']);
+    expect(getNavigationTabs('parking')).toEqual(['nearby', 'map', 'search', 'favorites', 'settings']);
   });
 });

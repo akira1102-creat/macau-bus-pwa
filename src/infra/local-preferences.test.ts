@@ -5,11 +5,17 @@ import {
   createLocalPreferences,
   DEFAULT_PREFERENCES,
   getFavorites,
+  getActiveMode,
+  getParkingAlertThreshold,
+  getParkingFavorites,
   getNotificationLeadStops,
   getRecent,
   getTheme,
   loadPreferences,
   setFavorites,
+  setActiveMode,
+  setParkingAlertThreshold,
+  setParkingFavorites,
   setNotificationLeadStops,
   setTheme,
   type PreferencesStorage,
@@ -88,7 +94,7 @@ describe('versioned local preferences', () => {
     expect(updatedRelease.getTheme()).toBe('dark');
   });
 
-  it('migrates version-1 preferences to version 2 without losing saved values', () => {
+  it('migrates version-1 preferences to the current schema without losing saved values', () => {
     const storage = createStorage();
     const preferences = createLocalPreferences({ storage });
     storage.setItem(preferences.storageKey, JSON.stringify({
@@ -99,13 +105,72 @@ describe('versioned local preferences', () => {
     }));
 
     expect(preferences.get()).toEqual({
-      version: 2,
+      version: 3,
       favorites: ['1'],
       recent: ['26A'],
       theme: 'dark',
       notificationLeadStops: 3,
+      activeMode: null,
+      parkingFavorites: [],
+      parkingAlertThreshold: 10,
     });
-    expect(JSON.parse(storage.getItem(preferences.storageKey) ?? '{}')).toMatchObject({ version: 2, notificationLeadStops: 3 });
+    expect(JSON.parse(storage.getItem(preferences.storageKey) ?? '{}')).toMatchObject({ version: 3, notificationLeadStops: 3 });
+  });
+
+  it('migrates older preferences without losing bus fields and adds parking defaults', () => {
+    const storage = createStorage();
+    const preferences = createLocalPreferences({ storage });
+    storage.setItem(preferences.storageKey, JSON.stringify({
+      version: 2,
+      favorites: ['1', '26A'],
+      recent: ['MT1', '26A'],
+      theme: 'dark',
+      notificationLeadStops: 8,
+    }));
+
+    expect(preferences.get()).toEqual({
+      version: 3,
+      favorites: ['1', '26A'],
+      recent: ['MT1', '26A'],
+      theme: 'dark',
+      notificationLeadStops: 8,
+      activeMode: null,
+      parkingFavorites: [],
+      parkingAlertThreshold: 10,
+    });
+    expect(JSON.parse(storage.getItem(preferences.storageKey) ?? '{}')).toMatchObject({
+      version: 3,
+      activeMode: null,
+      parkingFavorites: [],
+      parkingAlertThreshold: 10,
+    });
+  });
+
+  it('normalizes parking mode, favorites and threshold bounds without duplicates', () => {
+    const storage = createStorage();
+    const preferences = createLocalPreferences({ storage });
+
+    expect(preferences.set({
+      ...preferences.get(),
+      activeMode: 'parking',
+      parkingFavorites: [' 42 ', '42', '', '105'],
+      parkingAlertThreshold: 50,
+    })).toMatchObject({
+      activeMode: 'parking',
+      parkingFavorites: ['42', '105'],
+      parkingAlertThreshold: 50,
+    });
+    expect(setActiveMode('bus', { storage }).activeMode).toBe('bus');
+    expect(getActiveMode({ storage })).toBe('bus');
+    expect(setParkingFavorites(['42', ' 42 ', '7'], { storage }).parkingFavorites).toEqual(['42', '7']);
+    expect(getParkingFavorites({ storage })).toEqual(['42', '7']);
+    expect(setParkingAlertThreshold(1, { storage }).parkingAlertThreshold).toBe(1);
+    expect(getParkingAlertThreshold({ storage })).toBe(1);
+    expect(setParkingAlertThreshold(100, { storage }).parkingAlertThreshold).toBe(100);
+    expect(getParkingAlertThreshold({ storage })).toBe(100);
+    expect(setParkingAlertThreshold(0, { storage }).parkingAlertThreshold).toBe(10);
+    expect(setParkingAlertThreshold(101, { storage }).parkingAlertThreshold).toBe(10);
+    expect(setParkingAlertThreshold(1.5, { storage }).parkingAlertThreshold).toBe(10);
   });
 
   it.each([0, 11, 1.5, null, '3'])('normalizes invalid stored lead count %s to three', (value) => {
