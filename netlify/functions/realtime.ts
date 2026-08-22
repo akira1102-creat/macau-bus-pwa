@@ -12,13 +12,6 @@ function parseDirection(value: string): DirectionId | undefined {
   return undefined;
 }
 
-function maskIdentifier(value: string): string {
-  const normalized = value.trim();
-  if (!normalized) return '';
-  if (normalized.length <= 2) return '••';
-  return `${normalized.slice(0, 1)}••${normalized.slice(-1)}`;
-}
-
 function clientKey(context: Context): string {
   return context.ip?.trim() || 'unknown-client';
 }
@@ -81,10 +74,7 @@ export default async function realtimeHandler(request: Request, context: Context
         ageSeconds: 0,
         stale: false,
         source: 'DSAT observation',
-        buses: upstream.buses.map((bus) => ({
-          ...bus,
-          plate: maskIdentifier(bus.plate),
-        })),
+        buses: upstream.buses,
       });
     });
     return jsonResponse(request, {

@@ -134,7 +134,7 @@ describe('RoutePage', () => {
     expect(screen.getByText(/約 1 分鐘到 中央站/)).toBeVisible();
   });
 
-  it('masks plate and station code diagnostics and requires a development build', async () => {
+  it('shows the full plate while masking development diagnostics', async () => {
     expect(isDebugPanelEnabled(true, false)).toBe(false);
     expect(isDebugPanelEnabled(true, true)).toBe(true);
 
@@ -144,7 +144,7 @@ describe('RoutePage', () => {
     renderRoute(getRealtimeRoute, { devMode: true });
 
     expect(await screen.findByText('開發診斷')).toBeVisible();
-    expect(screen.queryByText('AB1234')).not.toBeInTheDocument();
+    expect(screen.getByText('AB1234')).toBeVisible();
     fireEvent.click(screen.getByText('開發診斷'));
     const panel = screen.getByText('開發診斷').closest('details');
     expect(panel).not.toBeNull();

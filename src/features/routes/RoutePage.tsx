@@ -29,17 +29,6 @@ export function isDebugPanelEnabled(devMode: boolean, environmentDev = import.me
   return environmentDev && devMode;
 }
 
-function maskIdentifier(value: string): string {
-  const normalized = value.trim();
-  if (!normalized) {
-    return '—';
-  }
-  if (normalized.length <= 2) {
-    return '••';
-  }
-  return `${normalized.slice(0, 1)}••${normalized.slice(-1)}`;
-}
-
 function nextStop(direction: RouteDirection, stationCode: string, repository: CatalogRepository) {
   const index = direction.stopIds.indexOf(stationCode.trim());
   const nextId = index >= 0 ? direction.stopIds[index + 1] : undefined;
@@ -262,7 +251,7 @@ function BusObservation({ bus, routeId, directionId, direction, repository, cata
     <article className="bus-observation">
       <BusFront aria-hidden="true" className="bus-observation-icon" size={35} strokeWidth={1.8} />
       <div className="bus-observation-copy">
-        <strong>{bus.plate.trim() ? maskIdentifier(bus.plate) : '未提供車牌'}</strong>
+        <strong>{bus.plate.trim() || '未提供車牌'}</strong>
         <span>目前：{bus.stationCode} {stationName}</span>
         <span className="estimated-label">{messages.estimatedPosition}</span>
         <span className="eta-label">{eta === null ? messages.etaUnavailable : `約 ${eta} 分鐘到 ${target?.nameCn ?? ''}`}</span>

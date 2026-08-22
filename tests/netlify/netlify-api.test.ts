@@ -167,10 +167,10 @@ describe('Netlify realtime function', () => {
       direction: 0,
       stale: false,
       source: 'DSAT observation',
-      buses: [{ plate: 'S••1', stationCode: 'M1', speedKph: 9.5 }],
+      buses: [{ plate: 'SANITIZED-PLATE-001', stationCode: 'M1', speedKph: 9.5 }],
     });
     expect(body).not.toHaveProperty('raw');
-    expect(JSON.stringify(body)).not.toContain('SANITIZED-PLATE-001');
+    expect(JSON.stringify(body)).toContain('SANITIZED-PLATE-001');
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' });
   });

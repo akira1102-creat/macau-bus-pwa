@@ -35,7 +35,7 @@ test.describe('PWA release surface', () => {
     expect(worker).toContain('clients.claim');
     expect(worker).toContain('NetworkFirst');
     expect(worker).toContain('NetworkOnly');
-    expect(worker).toContain('macau-bus-pwa-v0.2.3');
+    expect(worker).toContain('macau-bus-pwa-v0.2.4');
   });
 
   test('runs an update check without clearing local preferences', async ({ page }) => {
