@@ -5,10 +5,12 @@ import {
   createLocalPreferences,
   DEFAULT_PREFERENCES,
   getFavorites,
+  getNotificationLeadStops,
   getRecent,
   getTheme,
   loadPreferences,
   setFavorites,
+  setNotificationLeadStops,
   setTheme,
   type PreferencesStorage,
 } from './local-preferences';
@@ -84,6 +86,53 @@ describe('versioned local preferences', () => {
 
     expect(updatedRelease.getFavorites()).toEqual(['1', '26A']);
     expect(updatedRelease.getTheme()).toBe('dark');
+  });
+
+  it('migrates version-1 preferences to version 2 without losing saved values', () => {
+    const storage = createStorage();
+    const preferences = createLocalPreferences({ storage });
+    storage.setItem(preferences.storageKey, JSON.stringify({
+      version: 1,
+      favorites: ['1'],
+      recent: ['26A'],
+      theme: 'dark',
+    }));
+
+    expect(preferences.get()).toEqual({
+      version: 2,
+      favorites: ['1'],
+      recent: ['26A'],
+      theme: 'dark',
+      notificationLeadStops: 3,
+    });
+    expect(JSON.parse(storage.getItem(preferences.storageKey) ?? '{}')).toMatchObject({ version: 2, notificationLeadStops: 3 });
+  });
+
+  it.each([0, 11, 1.5, null, '3'])('normalizes invalid stored lead count %s to three', (value) => {
+    const storage = createStorage();
+    const preferences = createLocalPreferences({ storage });
+    storage.setItem(preferences.storageKey, JSON.stringify({
+      version: 2,
+      favorites: ['1'],
+      recent: [],
+      theme: 'system',
+      notificationLeadStops: value,
+    }));
+
+    expect(preferences.getNotificationLeadStops()).toBe(3);
+    expect(preferences.getFavorites()).toEqual(['1']);
+  });
+
+  it('persists lead counts at the one and ten stop limits', () => {
+    const storage = createStorage();
+    const preferences = createLocalPreferences({ storage });
+
+    expect(preferences.setNotificationLeadStops(1).notificationLeadStops).toBe(1);
+    expect(preferences.getNotificationLeadStops()).toBe(1);
+    expect(preferences.setNotificationLeadStops(10).notificationLeadStops).toBe(10);
+    expect(getNotificationLeadStops({ storage })).toBe(10);
+    expect(setNotificationLeadStops(1, { storage }).notificationLeadStops).toBe(1);
+    expect(getNotificationLeadStops({ storage })).toBe(1);
   });
 
   it('keeps preference actions safe when localStorage setItem is unavailable', () => {

@@ -461,20 +461,59 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
 .bus-observation-speed { display: flex; align-items: center; gap: 5px; margin-top: 14px; color: var(--color-text); white-space: nowrap; }
 .bus-observation-speed span { font-size: 1.05rem; }
 .route-source-note { margin: 18px 0 0; color: var(--color-muted); font-size: 0.93rem; }
-.route-stop-row { display: grid; grid-template-columns: 32px 17px 1fr auto; align-items: center; min-height: 65px; border-bottom: 1px solid var(--color-divider); }
+.route-stop-row { display: grid; grid-template-columns: 32px 17px minmax(0, 1fr) auto; align-items: center; width: 100%; min-height: 65px; padding: 0; border-top: 0; border-right: 0; border-left: 0; border-bottom: 1px solid var(--color-divider); background: transparent; color: inherit; text-align: left; }
 .route-stop-index { color: var(--color-muted); text-align: center; }
 .route-stop-line { align-self: stretch; width: 2px; margin: -1px auto; background: var(--color-divider); }
 .route-stop-row.is-observed .route-stop-line { background: var(--color-jade); }
 .route-stop-copy { display: flex; flex-direction: column; padding: 8px 12px; }
 .route-stop-copy strong { font-size: 1.1rem; }
 .route-stop-copy span { color: var(--color-muted); }
+.plate-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 46%; padding: 7px 0 7px 6px; }
+.plate-badge { padding: 2px 7px; border: 1px solid var(--color-jade); border-radius: 999px; color: var(--color-jade-dark); background: var(--color-jade-soft); font-size: 0.78rem; font-weight: 700; white-space: nowrap; }
 .observed-label { color: var(--color-jade-dark); font-size: 0.85rem; }
 .route-not-found { padding-top: 18px; }
 .back-button { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--color-jade-dark); font-weight: 650; }
 
+.arrival-alert-backdrop { position: fixed; inset: 0; z-index: 40; display: flex; align-items: flex-end; justify-content: center; padding: 16px; background: rgba(23, 28, 36, 0.42); }
+.arrival-alert-sheet { width: min(100%, 680px); max-height: min(90dvh, 620px); overflow: auto; padding: 22px 20px calc(24px + env(safe-area-inset-bottom)); border: 1px solid var(--color-divider); border-radius: 22px 22px 12px 12px; background: var(--color-surface); box-shadow: 0 14px 46px var(--color-shadow); }
+.arrival-alert-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.arrival-alert-heading h2 { margin: 0; font-size: 1.45rem; }
+.arrival-alert-heading p { margin: 2px 0 0; color: var(--color-muted); }
+.arrival-alert-kicker { font-size: 0.9rem; font-weight: 700; }
+.arrival-alert-lead { margin: 20px 0 12px; font-size: 1.15rem; }
+.arrival-alert-message, .arrival-alert-success { margin: 12px 0; padding: 10px 12px; border-radius: 10px; background: var(--color-jade-soft); color: var(--color-jade-dark); }
+.arrival-alert-error { color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 9%, var(--color-surface)); }
+.arrival-alert-active { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 8px 12px; border: 1px solid var(--color-jade); border-radius: 12px; }
+.arrival-alert-active p { margin: 0; }
+.arrival-alert-primary { width: 100%; min-height: 48px; margin-top: 8px; border: 0; border-radius: 12px; background: var(--color-jade); color: #fff; font-weight: 700; }
+
+.nearby-arrivals { min-width: 0; }
+.nearby-arrival-stop { min-width: 0; }
+.nearby-arrival-list { display: grid; gap: 8px; margin: 0 0 12px 65px; padding: 0; list-style: none; }
+.nearby-arrival-row { min-width: 0; }
+.nearby-arrival-button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "route direction remaining" "route plate remaining"; align-items: center; gap: 0 10px; width: 100%; min-height: 60px; padding: 8px 12px; border: 1px solid var(--color-divider); border-radius: 12px; background: var(--color-surface); text-align: left; }
+.nearby-arrival-button:hover { border-color: var(--color-jade); background: var(--color-jade-soft); }
+.nearby-arrival-route { grid-area: route; min-width: 42px; color: var(--color-jade-dark); font-size: 1.25rem; font-weight: 750; }
+.nearby-arrival-direction { grid-area: direction; min-width: 0; overflow: hidden; color: var(--color-text); text-overflow: ellipsis; white-space: nowrap; }
+.nearby-arrival-plate { grid-area: plate; min-width: 0; overflow: hidden; color: var(--color-muted); text-overflow: ellipsis; white-space: nowrap; }
+.nearby-arrival-remaining { grid-area: remaining; min-width: 64px; color: var(--color-amber); font-size: 0.9rem; font-weight: 700; text-align: right; white-space: nowrap; }
+.nearby-arrivals-empty { margin: -3px 0 12px 65px; }
+
 .settings-page { padding-top: 8px; }
 .settings-section { margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--color-divider); }
 .settings-section h2 { margin: 0 0 11px; font-size: 1.25rem; }
+.settings-support-status { margin: 0 0 14px; color: var(--color-muted); }
+.lead-stop-options { margin: 0; padding: 0; border: 0; }
+.lead-stop-options legend { margin-bottom: 8px; color: var(--color-text); font-weight: 650; }
+.lead-stop-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+.lead-stop-option { display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 5px 4px; border: 1px solid var(--color-divider); border-radius: 10px; color: var(--color-muted); cursor: pointer; font-size: 0.88rem; text-align: center; }
+.lead-stop-option.is-selected { border-color: var(--color-jade); background: var(--color-jade-soft); color: var(--color-jade-dark); font-weight: 700; }
+.lead-stop-option input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.settings-alerts { margin-top: 20px; }
+.settings-alerts h3 { margin: 0 0 8px; font-size: 1rem; }
+.settings-alert-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 6px 0; border-bottom: 1px solid var(--color-divider); }
+.settings-alert-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-alert-error { color: var(--color-danger); }
 .theme-options { display: grid; gap: 8px; }
 .theme-option { display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 9px 12px; border: 1px solid var(--color-divider); border-radius: 12px; color: var(--color-muted); cursor: pointer; }
 .theme-option.is-selected { border-color: var(--color-jade); background: var(--color-jade-soft); color: var(--color-jade-dark); }

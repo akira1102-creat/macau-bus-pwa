@@ -1,14 +1,16 @@
 import { ArrowLeft, BusFront, ChevronRight, Star } from 'lucide-react';
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 
 import type { CatalogRepository } from '../../data/catalog-repository';
 import { estimateEtaMinutes } from '../../domain/eta';
 import { getCurrentPositionOnce, type CurrentPosition } from '../../infra/geolocation';
 import type { LocalPreferences } from '../../infra/local-preferences';
-import type { DirectionId, RealtimeBus, RouteDirection, TransitCatalog } from '../../../shared/transit-contract';
+import { createPushClient, type PushClient } from '../../infra/push-client';
+import type { BusStop, DirectionId, RealtimeBus, RouteDirection, RouteSummary, TransitCatalog } from '../../../shared/transit-contract';
 import { messages } from '../../i18n/messages';
 import { StateMessage } from '../../components/StateMessage';
 import { useRealtimePolling, type RealtimeClientLike } from './useRealtimePolling';
+import { ArrivalAlertSheet } from './ArrivalAlertSheet';
 
 const LazyRouteMap = lazy(() => import('../map/RouteMap'));
 const LazyDevDebugPanel = import.meta.env.DEV ? lazy(() => import('./dev-debug')) : null;
@@ -20,6 +22,9 @@ export interface RoutePageProps {
   preferences: LocalPreferences;
   realtimeClient: RealtimeClientLike;
   onBack: () => void;
+  initialDirectionId?: DirectionId;
+  onDirectionChange?: (directionId: DirectionId) => void;
+  pushClient?: PushClient;
   getCurrentPosition?: () => Promise<CurrentPosition>;
   showMap?: boolean;
   devMode?: boolean;
@@ -46,17 +51,29 @@ export function RoutePage({
   preferences,
   realtimeClient,
   onBack,
+  initialDirectionId,
+  onDirectionChange,
+  pushClient,
   getCurrentPosition = getCurrentPositionOnce,
   showMap = true,
   devMode = import.meta.env.DEV,
 }: RoutePageProps) {
   const route = repository.getRoute(routeId);
-  const [directionId, setDirectionId] = useState<DirectionId>(route?.directions.some((direction) => direction.id === 0) ? 0 : 1);
+  const initialDirection = route?.directions.find((candidate) => candidate.id === initialDirectionId)
+    ?? route?.directions.find((candidate) => candidate.id === 0)
+    ?? route?.directions[0];
+  const [directionId, setDirectionId] = useState<DirectionId>(initialDirection?.id ?? 0);
+  useEffect(() => {
+    if (initialDirectionId !== undefined && initialDirection && initialDirection.id !== directionId) {
+      setDirectionId(initialDirection.id);
+    }
+  }, [directionId, initialDirectionId, initialDirection?.id]);
   const direction = route?.directions.find((candidate) => candidate.id === directionId) ?? route?.directions[0];
-  const [activeTab, setActiveTab] = useState<'realtime' | 'stops'>('realtime');
+  const [activeTab, setActiveTab] = useState<'realtime' | 'stops'>('stops');
   const [favorite, setFavorite] = useState(() => preferences.getFavorites().includes(routeId));
   const [userPosition, setUserPosition] = useState<CurrentPosition | null>(null);
   const [locationMessage, setLocationMessage] = useState('');
+  const alertClient = useMemo(() => pushClient ?? createPushClient(), [pushClient]);
 
   const polling = useRealtimePolling(route?.id ?? routeId, direction?.id ?? 0, realtimeClient, { enabled: Boolean(route && direction) });
   const buses = polling.data?.buses ?? [];
@@ -93,6 +110,11 @@ export function RoutePage({
     setFavorite(next.favorites.includes(route.id));
   };
 
+  const selectDirection = (nextDirectionId: DirectionId) => {
+    setDirectionId(nextDirectionId);
+    onDirectionChange?.(nextDirectionId);
+  };
+
   return (
     <div className="route-page">
       <header className="route-heading">
@@ -120,7 +142,7 @@ export function RoutePage({
             aria-controls="direction-panel"
             aria-selected={candidate.id === direction.id}
             className={candidate.id === direction.id ? 'is-selected' : ''}
-            onClick={() => setDirectionId(candidate.id)}
+            onClick={() => selectDirection(candidate.id)}
           >
             {candidate.name}
           </button>
@@ -143,11 +165,11 @@ export function RoutePage({
         ) : null}
 
         <div className="route-data-tabs" role="tablist" aria-label="路線資料">
-          <button type="button" role="tab" id="realtime-tab" aria-controls="realtime-panel" aria-selected={activeTab === 'realtime'} className={activeTab === 'realtime' ? 'is-selected' : ''} onClick={() => setActiveTab('realtime')}>
-            {messages.realtime}
-          </button>
           <button type="button" role="tab" id="stops-tab" aria-controls="stops-panel" aria-selected={activeTab === 'stops'} className={activeTab === 'stops' ? 'is-selected' : ''} onClick={() => setActiveTab('stops')}>
             {messages.stops}
+          </button>
+          <button type="button" role="tab" id="realtime-tab" aria-controls="realtime-panel" aria-selected={activeTab === 'realtime'} className={activeTab === 'realtime' ? 'is-selected' : ''} onClick={() => setActiveTab('realtime')}>
+            {messages.realtime}
           </button>
         </div>
 
@@ -166,7 +188,7 @@ export function RoutePage({
             stationNames={currentStationNames}
           />
         ) : (
-          <StopsPanel direction={direction} buses={buses} stationNames={currentStationNames} />
+          <StopsPanel route={route} direction={direction} stops={stops} buses={buses} stationNames={currentStationNames} leadStops={preferences.getNotificationLeadStops()} pushClient={alertClient} />
         )}
       </div>
       <p className="route-source-note">{messages.sourceNote}</p>
@@ -265,23 +287,56 @@ function BusObservation({ bus, routeId, directionId, direction, repository, cata
 }
 
 interface StopsPanelProps {
+  route: RouteSummary;
   direction: RouteDirection;
+  stops: BusStop[];
   buses: RealtimeBus[];
   stationNames: Map<string, string>;
+  leadStops: number;
+  pushClient: PushClient;
 }
 
-function StopsPanel({ direction, buses, stationNames }: StopsPanelProps) {
-  const observed = new Set(buses.map((bus) => bus.stationCode));
+function StopsPanel({ route, direction, stops, buses, stationNames, leadStops, pushClient }: StopsPanelProps) {
+  const [selectedStop, setSelectedStop] = useState<{ stop: BusStop; index: number } | null>(null);
+  const stopsById = useMemo(() => new Map(stops.map((stop) => [stop.id, stop])), [stops]);
   return (
     <section className="stops-panel" role="tabpanel" id="stops-panel" aria-labelledby="stops-tab" aria-label={messages.stops} tabIndex={0}>
       {direction.stopIds.map((stopId, index) => (
-        <div className={`route-stop-row${observed.has(stopId) ? ' is-observed' : ''}`} key={stopId}>
-          <span className="route-stop-index">{index + 1}</span>
-          <span className="route-stop-line" aria-hidden="true" />
-          <span className="route-stop-copy"><strong>{stopId}</strong><span>{stationNames.get(stopId) ?? stopId}</span></span>
-          {observed.has(stopId) ? <span className="observed-label">有觀測</span> : null}
-        </div>
+        (() => {
+          const stop = stopsById.get(stopId);
+          if (!stop) {
+            return null;
+          }
+          const plates = buses
+            .filter((bus) => bus.stationCode.trim() === stopId.trim())
+            .map((bus) => bus.plate.trim() || '未提供車牌');
+          return (
+            <button
+              className={`route-stop-row${plates.length > 0 ? ' is-observed' : ''}`}
+              key={`${stopId}-${index}`}
+              type="button"
+              aria-label={`設定 ${stop.nameCn} 到站提醒`}
+              onClick={() => setSelectedStop({ stop, index })}
+            >
+              <span className="route-stop-index">{index + 1}</span>
+              <span className="route-stop-line" aria-hidden="true" />
+              <span className="route-stop-copy"><strong>{stopId}</strong><span>{stationNames.get(stopId) ?? stop.nameCn}</span></span>
+              {plates.length > 0 ? <span className="plate-badges" aria-label={`${stop.nameCn} 觀測車牌`}>{plates.map((plate, plateIndex) => <span className="plate-badge" key={`${plate}-${plateIndex}`}>{plate}</span>)}</span> : null}
+            </button>
+          );
+        })()
       ))}
+      {selectedStop ? (
+        <ArrivalAlertSheet
+          route={route}
+          direction={direction}
+          stop={selectedStop.stop}
+          targetStopIndex={selectedStop.index}
+          leadStops={leadStops}
+          pushClient={pushClient}
+          onClose={() => setSelectedStop(null)}
+        />
+      ) : null}
     </section>
   );
 }

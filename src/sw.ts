@@ -12,6 +12,7 @@ import {
   isNetworkOnlyRequest,
 } from './pwa/cache-policy';
 import { APP_RELEASE } from './pwa/release';
+import { handleNotificationClick, handlePushEvent } from './pwa/push-handlers';
 
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>;
@@ -77,6 +78,18 @@ self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') {
     void self.skipWaiting();
   }
+});
+
+self.addEventListener('push', (event) => {
+  event.waitUntil(handlePushEvent({ data: event.data, registration: self.registration }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.waitUntil(handleNotificationClick({
+    notification: event.notification,
+    clients: self.clients,
+    scope: self.registration.scope,
+  }));
 });
 
 registerRoute(

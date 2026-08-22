@@ -3,20 +3,23 @@ import { useMemo, useRef, useState } from 'react';
 
 import type { CatalogRepository } from '../../data/catalog-repository';
 import { findNearbyStops, type NearbyStop } from '../../domain/nearby';
+import type { DirectionId, RouteSummary, TransitCatalog } from '../../../shared/transit-contract';
+import type { ArrivalsClient } from '../../infra/arrivals-client';
 import { getCurrentPositionOnce, type CurrentPosition } from '../../infra/geolocation';
 import type { LocalPreferences, Preferences } from '../../infra/local-preferences';
-import type { RouteSummary, TransitCatalog } from '../../../shared/transit-contract';
 import { messages } from '../../i18n/messages';
 import { RouteListItem } from '../../components/RouteListItem';
 import { StateMessage } from '../../components/StateMessage';
 import { StopListItem } from '../../components/StopListItem';
+import { NearbyArrivals } from './NearbyArrivals';
 
 export interface HomePageProps {
   catalog: TransitCatalog;
   repository: CatalogRepository;
   preferences: LocalPreferences;
-  onOpenRoute: (routeId: string) => void;
+  onOpenRoute: (routeId: string, directionId?: DirectionId) => void;
   getCurrentPosition?: () => Promise<CurrentPosition>;
+  arrivalsClient?: ArrivalsClient;
 }
 
 function routeMatches(route: RouteSummary, query: string): boolean {
@@ -43,7 +46,7 @@ function refreshPreferences(preferences: LocalPreferences): Preferences {
   return preferences.get();
 }
 
-export function HomePage({ catalog, repository, preferences, onOpenRoute, getCurrentPosition = getCurrentPositionOnce }: HomePageProps) {
+export function HomePage({ catalog, repository, preferences, onOpenRoute, getCurrentPosition = getCurrentPositionOnce, arrivalsClient }: HomePageProps) {
   const [query, setQuery] = useState('');
   const [preferenceState, setPreferenceState] = useState<Preferences>(() => refreshPreferences(preferences));
   const [nearbyStops, setNearbyStops] = useState<NearbyStop[]>([]);
@@ -73,9 +76,13 @@ export function HomePage({ catalog, repository, preferences, onOpenRoute, getCur
     [preferenceState.recent, repository],
   );
 
-  const openRoute = (routeId: string) => {
+  const openRoute = (routeId: string, directionId?: DirectionId) => {
     setPreferenceState(preferences.addRecent(routeId));
-    onOpenRoute(routeId);
+    if (directionId === undefined) {
+      onOpenRoute(routeId);
+    } else {
+      onOpenRoute(routeId, directionId);
+    }
   };
 
   const toggleFavorite = (routeId: string) => {
@@ -175,7 +182,14 @@ export function HomePage({ catalog, repository, preferences, onOpenRoute, getCur
         {nearbyState === 'idle' ? <p className="muted-copy">按「使用目前位置」查看附近站點；位置只會在此裝置計算。</p> : null}
         {nearbyState === 'ready' ? (
           <>
-            {nearbyStops.length > 0 ? nearbyStops.slice(0, 5).map(({ stop, distanceMeters }) => (
+            {nearbyStops.length > 0 ? arrivalsClient ? (
+              <NearbyArrivals
+                nearbyStops={nearbyStops}
+                repository={repository}
+                arrivalsClient={arrivalsClient}
+                onOpenRoute={openRoute}
+              />
+            ) : nearbyStops.slice(0, 5).map(({ stop, distanceMeters }) => (
               <StopListItem
                 key={stop.id}
                 stop={stop}

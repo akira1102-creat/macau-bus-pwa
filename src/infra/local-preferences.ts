@@ -7,18 +7,20 @@ export const ThemeSchema = z.enum(['system', 'light', 'dark']);
 export type Theme = z.infer<typeof ThemeSchema>;
 
 export const PreferencesSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   favorites: z.array(z.string().trim().min(1)),
   recent: z.array(z.string().trim().min(1)),
   theme: ThemeSchema,
+  notificationLeadStops: z.number().int().min(1).max(10),
 });
 export type Preferences = z.infer<typeof PreferencesSchema>;
 
 export const DEFAULT_PREFERENCES: Preferences = {
-  version: 1,
+  version: 2,
   favorites: [],
   recent: [],
   theme: 'system',
+  notificationLeadStops: 3,
 };
 
 /** Minimal Storage surface keeps this adapter testable without a browser or network. */
@@ -46,6 +48,7 @@ function copyDefault(): Preferences {
     favorites: [],
     recent: [],
     theme: DEFAULT_PREFERENCES.theme,
+    notificationLeadStops: DEFAULT_PREFERENCES.notificationLeadStops,
   };
 }
 
@@ -74,6 +77,7 @@ function clonePreferences(value: Preferences): Preferences {
     favorites: [...value.favorites],
     recent: [...value.recent],
     theme: value.theme,
+    notificationLeadStops: value.notificationLeadStops,
   };
 }
 
@@ -115,13 +119,37 @@ function uniqueStrings(values: readonly string[], max = Number.POSITIVE_INFINITY
   return result;
 }
 
-function normalizePreferences(value: Preferences): Preferences {
+function normalizeLeadStops(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10
+    ? value
+    : DEFAULT_PREFERENCES.notificationLeadStops;
+}
+
+function normalizePreferences(value: Pick<Preferences, 'favorites' | 'recent' | 'theme'> & { notificationLeadStops?: unknown }): Preferences {
   return {
-    version: 1,
+    version: 2,
     favorites: uniqueStrings(value.favorites),
     recent: uniqueStrings(value.recent, 10),
     theme: value.theme,
+    notificationLeadStops: normalizeLeadStops(value.notificationLeadStops),
   };
+}
+
+const StoredPreferencesSchema = z.object({
+  version: z.union([z.literal(1), z.literal(2)]),
+  favorites: z.array(z.string().trim().min(1)),
+  recent: z.array(z.string().trim().min(1)),
+  theme: ThemeSchema,
+  notificationLeadStops: z.unknown().optional(),
+});
+
+function persistLoadedPreferences(storage: PreferencesStorage, key: string, preferences: Preferences): void {
+  try {
+    storage.setItem(key, JSON.stringify(preferences));
+    forgetStorageFallback(storage, key);
+  } catch {
+    rememberStorageFallback(storage, key, preferences);
+  }
 }
 
 export function loadPreferences(options: PreferencesOptions = {}): Preferences {
@@ -146,12 +174,16 @@ export function loadPreferences(options: PreferencesOptions = {}): Preferences {
 
   try {
     const parsed: unknown = JSON.parse(raw);
-    const validated = PreferencesSchema.safeParse(parsed);
+    const validated = StoredPreferencesSchema.safeParse(parsed);
     if (!validated.success) {
       storage.removeItem(key);
       return copyDefault();
     }
-    return normalizePreferences(validated.data);
+    const normalized = normalizePreferences(validated.data);
+    if (validated.data.version !== normalized.version || validated.data.notificationLeadStops !== normalized.notificationLeadStops) {
+      persistLoadedPreferences(storage, key, normalized);
+    }
+    return normalized;
   } catch {
     try {
       storage.removeItem(key);
@@ -193,6 +225,8 @@ export interface LocalPreferences {
   addRecent(routeId: string): Preferences;
   getTheme(): Theme;
   setTheme(theme: Theme): Preferences;
+  getNotificationLeadStops(): number;
+  setNotificationLeadStops(value: number): Preferences;
 }
 
 export function createLocalPreferences(options: LocalPreferencesOptions = {}): LocalPreferences {
@@ -243,6 +277,11 @@ export function createLocalPreferences(options: LocalPreferencesOptions = {}): L
       const current = read();
       return persist({ ...current, theme });
     },
+    getNotificationLeadStops: () => read().notificationLeadStops,
+    setNotificationLeadStops: (value) => {
+      const current = read();
+      return persist({ ...current, notificationLeadStops: normalizeLeadStops(value) });
+    },
   };
 }
 
@@ -279,4 +318,13 @@ export function getTheme(options: PreferencesOptions = {}): Theme {
 export function setTheme(theme: Theme, options: PreferencesOptions = {}): Preferences {
   const current = loadPreferences(options);
   return savePreferences({ ...current, theme }, options);
+}
+
+export function getNotificationLeadStops(options: PreferencesOptions = {}): number {
+  return loadPreferences(options).notificationLeadStops;
+}
+
+export function setNotificationLeadStops(value: number, options: PreferencesOptions = {}): Preferences {
+  const current = loadPreferences(options);
+  return savePreferences({ ...current, notificationLeadStops: normalizeLeadStops(value) }, options);
 }

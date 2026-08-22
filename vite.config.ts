@@ -57,6 +57,7 @@ export default defineConfig(({ mode }) => {
       environment: 'node',
       setupFiles: ['./src/test/setup.ts'],
       include: [
+        'shared/**/*.test.ts',
         'src/**/*.test.ts',
         'src/**/*.test.tsx',
         'scripts/**/*.test.ts',

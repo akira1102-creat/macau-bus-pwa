@@ -4,8 +4,10 @@ import type { CatalogRepository } from '../data/catalog-repository';
 import { createCatalogRepository, loadCatalog } from '../data/catalog-repository';
 import { getCurrentPositionOnce } from '../infra/geolocation';
 import { createRealtimeApiClient } from '../infra/api-client';
+import { createArrivalsClient } from '../infra/arrivals-client';
+import { createPushClient } from '../infra/push-client';
 import { createLocalPreferences, type LocalPreferences, type Theme } from '../infra/local-preferences';
-import type { TransitCatalog } from '../../shared/transit-contract';
+import type { DirectionId, TransitCatalog } from '../../shared/transit-contract';
 import { AppShell } from '../components/AppShell';
 import { StateMessage } from '../components/StateMessage';
 import { messages } from '../i18n/messages';
@@ -49,6 +51,8 @@ function CatalogError() {
 export function App({ loadCatalogData = defaultCatalogLoader, preferences: providedPreferences }: AppProps) {
   const preferences = useMemo(() => providedPreferences ?? createLocalPreferences(), [providedPreferences]);
   const realtimeClient = useMemo(() => createRealtimeApiClient(), []);
+  const arrivalsClient = useMemo(() => createArrivalsClient(), []);
+  const pushClient = useMemo(() => createPushClient(), []);
   const [catalogState, setCatalogState] = useState<{ status: 'loading' | 'ready' | 'error'; catalog: TransitCatalog | null }>({ status: 'loading', catalog: null });
   const [appRoute, setAppRoute] = useState<AppRoute>(() => parseRoute());
   const [theme, setTheme] = useState<Theme>(() => preferences.getTheme());
@@ -95,15 +99,19 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
     () => catalogState.catalog ? createCatalogRepository(catalogState.catalog) : null,
     [catalogState.catalog],
   );
-  const openRoute = useCallback((routeId: string) => {
-    navigateTo({ tab: 'routes', routeId });
+  const openRoute = useCallback((routeId: string, directionId?: DirectionId) => {
+    navigateTo(directionId === undefined ? { tab: 'routes', routeId } : { tab: 'routes', routeId, directionId });
   }, []);
-  const openMapRoute = useCallback((routeId: string) => {
-    navigateTo({ tab: 'map', routeId });
+  const openMapRoute = useCallback((routeId: string, directionId?: DirectionId) => {
+    navigateTo(directionId === undefined ? { tab: 'map', routeId } : { tab: 'map', routeId, directionId });
   }, []);
   const changeTab = useCallback((tab: AppTab) => {
-    navigateTo((tab === 'routes' || tab === 'map') && appRoute.routeId ? { tab, routeId: appRoute.routeId } : { tab });
-  }, [appRoute.routeId]);
+    navigateTo((tab === 'routes' || tab === 'map') && appRoute.routeId
+      ? appRoute.directionId === undefined
+        ? { tab, routeId: appRoute.routeId }
+        : { tab, routeId: appRoute.routeId, directionId: appRoute.directionId }
+      : { tab });
+  }, [appRoute.directionId, appRoute.routeId]);
   const handleThemeChange = (nextTheme: Theme) => {
     const next = preferences.setTheme(nextTheme);
     setTheme(next.theme);
@@ -118,17 +126,20 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
       {catalogState.status === 'ready' && repository && catalogState.catalog ? (
         routeDetail ? (
           <RoutePage
-            key={selectedRouteId}
+            key={`${selectedRouteId}-${appRoute.directionId ?? 'default'}`}
             routeId={selectedRouteId ?? ''}
             catalog={catalogState.catalog}
             repository={repository}
             preferences={preferences}
             realtimeClient={realtimeClient}
+            {...(appRoute.directionId === undefined ? {} : { initialDirectionId: appRoute.directionId })}
+            onDirectionChange={(directionId) => navigateTo({ tab: appRoute.tab, routeId: selectedRouteId, directionId }, true)}
+            pushClient={pushClient}
             getCurrentPosition={getCurrentPositionOnce}
             onBack={() => navigateTo({ tab: appRoute.tab === 'map' ? 'map' : 'routes' })}
           />
         ) : appRoute.tab === 'nearby' ? (
-          <HomePage catalog={catalogState.catalog} repository={repository} preferences={preferences} onOpenRoute={openRoute} getCurrentPosition={getCurrentPositionOnce} />
+          <HomePage catalog={catalogState.catalog} repository={repository} preferences={preferences} onOpenRoute={openRoute} getCurrentPosition={getCurrentPositionOnce} arrivalsClient={arrivalsClient} />
         ) : appRoute.tab === 'routes' ? (
           <RouteDirectoryPage catalog={catalogState.catalog} preferences={preferences} onOpenRoute={openRoute} title={messages.routeDirectory} emptyCopy="找不到符合的路線。" />
         ) : appRoute.tab === 'map' ? (
@@ -136,7 +147,7 @@ export function App({ loadCatalogData = defaultCatalogLoader, preferences: provi
         ) : appRoute.tab === 'favorites' ? (
           <RouteDirectoryPage catalog={catalogState.catalog} preferences={preferences} onOpenRoute={openRoute} onlyFavorites title={messages.favoritesRoutes} />
         ) : (
-          <SettingsPage preferences={preferences} onThemeChange={handleThemeChange} />
+          <SettingsPage preferences={preferences} onThemeChange={handleThemeChange} pushClient={pushClient} />
         )
       ) : null}
     </AppShell>

@@ -7,9 +7,13 @@ describe('service worker network policy', () => {
     'http://localhost:4173/api',
     'http://localhost:4173/api/health',
     'http://localhost:4173/api?probe=1',
+    'http://localhost:4173/api/push/public-key',
+    'http://localhost:4173/api/push/alerts',
+    'http://localhost:4173/api/push/subscriptions',
     'http://localhost:4173/macau-bus-pwa/api',
     'http://localhost:4173/macau-bus-pwa/api/health',
     'http://localhost:4173/macau-bus-pwa/api?probe=1',
+    'http://localhost:4173/macau-bus-pwa/api/push/alerts',
     'https://tile.openstreetmap.org/12/123/456.png',
     'https://a.tile.openstreetmap.org/12/123/456.png',
   ])('keeps %s network-only', (url) => {
@@ -30,13 +34,13 @@ describe('service worker network policy', () => {
     expect(getCatalogCacheRevision([
       { url: '/assets/app.js', revision: 'app-rev' },
       { url: '/data/catalog.json', revision: 'catalog-rev-1' },
-    ], 'macau-bus-pwa-v0.2.4')).toBe('catalog-rev-1');
+    ], 'macau-bus-pwa-v0.3.0')).toBe('catalog-rev-1');
     expect(getCatalogCacheRevision([
       { url: '/data/catalog.json', revision: null },
-    ], 'macau-bus-pwa-v0.2.4')).toBe('macau-bus-pwa-v0.2.4');
+    ], 'macau-bus-pwa-v0.3.0')).toBe('macau-bus-pwa-v0.3.0');
     expect(getCatalogCacheRevision([
       { url: '/macau-bus-pwa/data/catalog.json', revision: 'catalog-pages-rev' },
-    ], 'macau-bus-pwa-v0.2.4')).toBe('catalog-pages-rev');
+    ], 'macau-bus-pwa-v0.3.0')).toBe('catalog-pages-rev');
   });
 
   it('recognizes hashed assets below a project Pages base path', () => {
