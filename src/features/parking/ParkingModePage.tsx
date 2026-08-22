@@ -104,7 +104,8 @@ export function ParkingModePage({
     onOpenDetail: openDetail,
     getCurrentPosition,
     searchEnabled: tab === 'search',
-    ...(tab === 'search' ? { query: query ?? '', onQueryChange } : {}),
+    query: tab === 'search' ? query ?? '' : '',
+    ...(tab === 'search' ? { onQueryChange } : {}),
   };
   if (tab === 'map') {
     return <ParkingMapPage

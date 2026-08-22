@@ -73,4 +73,46 @@ describe('ParkingModePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '選取甲停車場' }));
     expect(onOpenDetail).toHaveBeenCalledWith('42', 'map');
   });
+
+  it('clears the old search filter when the reused list changes to nearby or favorites', async () => {
+    const facilities: ParkingSnapshot['facilities'] = [
+      { ...snapshot.facilities[0]!, id: '42', name: '澳門停車場', location: '澳門半島' },
+      { ...snapshot.facilities[0]!, id: '7', name: '氹仔停車場', location: '氹仔' },
+    ];
+    const client = {
+      getSnapshot: vi.fn().mockResolvedValue({ ...snapshot, facilities }),
+    } satisfies ParkingApiClient;
+    const preferences = createLocalPreferences();
+    preferences.setParkingFavorites(['42']);
+    const callbacks = { onOpenDetail: vi.fn(), onBack: vi.fn() };
+    const { rerender } = render(<ParkingModePage
+      tab="search"
+      query="氹仔"
+      client={client}
+      preferences={preferences}
+      onOpenDetail={callbacks.onOpenDetail}
+      onBack={callbacks.onBack}
+    />);
+
+    expect(await screen.findByText('氹仔停車場')).toBeVisible();
+    expect(screen.queryByText('澳門停車場')).not.toBeInTheDocument();
+
+    rerender(<ParkingModePage
+      tab="nearby"
+      client={client}
+      preferences={preferences}
+      onOpenDetail={callbacks.onOpenDetail}
+      onBack={callbacks.onBack}
+    />);
+    expect(screen.getByText('澳門停車場')).toBeVisible();
+
+    rerender(<ParkingModePage
+      tab="favorites"
+      client={client}
+      preferences={preferences}
+      onOpenDetail={callbacks.onOpenDetail}
+      onBack={callbacks.onBack}
+    />);
+    expect(screen.getByText('澳門停車場')).toBeVisible();
+  });
 });
