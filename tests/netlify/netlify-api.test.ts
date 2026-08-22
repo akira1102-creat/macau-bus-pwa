@@ -9,6 +9,7 @@ import { resetNetlifyRuntimeForTests } from '../../netlify/functions/_shared/run
 import { DsatClientError } from '../../server/dsat/dsat-client';
 
 const fixturePath = fileURLToPath(new URL('../fixtures/catalog/catalog.json', import.meta.url));
+const netlifyConfigPath = fileURLToPath(new URL('../../netlify.toml', import.meta.url));
 const allowedOrigin = 'https://akira1102-creat.github.io';
 
 const upstreamPayload = {
@@ -94,6 +95,15 @@ afterEach(() => {
   resetNetlifyRuntimeForTests();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+describe('Netlify production routing', () => {
+  it('does not shadow function-declared API paths with disabled default endpoints', () => {
+    const config = readFileSync(netlifyConfigPath, 'utf8');
+
+    expect(config).not.toContain('/.netlify/functions/parking');
+    expect(config).not.toContain('/.netlify/functions/push-parking-alerts');
+  });
 });
 
 describe('Netlify health function', () => {
