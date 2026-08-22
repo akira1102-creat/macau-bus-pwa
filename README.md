@@ -1,4 +1,4 @@
-# 澳門巴士 PWA
+# 澳門實時巴士 PWA
 
 This repository does not commit the generated Macau transit catalog. The upstream JSON files stay ignored by Git; local development and the GitHub Pages workflow generate a pinned, provenance-recorded catalog at build time. The DSAT data-open catalogue lists static bus route data as unconditionally open; review the pinned source and provenance before changing or redistributing the build pipeline.
 
@@ -7,7 +7,13 @@ This repository does not commit the generated Macau transit catalog. The upstrea
 - PWA：<https://akira1102-creat.github.io/macau-bus-pwa/>
 - 即時 API：<https://macau-bus-api-akr.netlify.app/api/health>
 
-GitHub Pages 只提供靜態 PWA。瀏覽器會把即時路線請求送到 Netlify Function；Function 只接受 `https://akira1102-creat.github.io` 的跨域請求、驗證路線及方向，並只回傳正規化後的 DSAT observation。
+GitHub Pages 只提供靜態 PWA。瀏覽器會把即時路線及泊車請求送到 Netlify Function；Function 只接受 `https://akira1102-creat.github.io` 的跨域請求，並只回傳正規化後的 DSAT observation／泊車空位資料。泊車 endpoint 是 `/api/parking`；泊車一次性提醒使用 `/api/push/parking-alerts`，由每分鐘執行的 `check-parking-alerts` scheduled function 檢查。
+
+## 資料來源、私隱及背景提醒
+
+本專案由公開功能分類重新實作，沒有接入或複製 APK 的私有 API、Firebase 設定、廣告、付款或登入。巴士／泊車資料經本專案的正規化 adapter 取得 DSAT 公開資料；DSAT 上游可能延遲、暫停或變更格式，所以畫面數值只供參考，`—` 不代表零。OpenStreetMap 只提供地圖圖磚。
+
+定位只在瀏覽器本機計算距離及排序，不會傳送至 server。收藏、模式及門檻只儲存在此裝置；背景提醒只會保存匿名 Web Push 訂閱所需的 token hash、訂閱識別及提醒內容。要實現關閉 PWA 後的泊車提醒，Netlify 需要設定 VAPID keys、Blobs 及 scheduled functions；目前自動化測試使用 fake PushManager，沒有聲稱已在實體裝置證實 delivery。
 
 ## Local setup
 
@@ -26,7 +32,7 @@ npm run build
 
 如果 `public/data/catalog.json` 尚未同步或暫時被重新命名，server 仍會啟動並提供 static shell；`/api/health` 會回傳 `catalogReady: false`，需要路線 catalog 的 API 會回傳 503、`no-store` 及 `npm run data:sync` action。可用 `CATALOG_PATH` 指向另一個 catalog 路徑作本機 smoke test。
 
-PWA release id 為 `macau-bus-pwa-v0.3.0`，並同步出現在 app release、service-worker cache names 及 production worker。Service worker 使用 navigation NetworkFirst、hashed shell／catalog CacheFirst，catalog cache 會包含 build-time catalog revision，`/api`（包括 project path 下的 API）及 OpenStreetMap tiles NetworkOnly；更新會在啟動、pageshow 及重返 visible 時檢查，保留 localStorage／IndexedDB。v0.3.0 加入附近站巴士尚餘站數、站點車牌，以及安裝後可用的一次性背景到站通知；瀏覽器只會向 API 傳送最多五個附近站 ID，不會傳送 GPS。
+PWA release id 為 `macau-bus-pwa-v0.4.0`，並同步出現在 app release、service-worker cache names 及 production worker。Service worker 使用 navigation NetworkFirst、hashed shell／catalog CacheFirst，catalog cache 會包含 build-time catalog revision，`/api`（包括 project path 下的 API）及 OpenStreetMap tiles NetworkOnly；更新會在啟動、pageshow 及重返 visible 時檢查，保留 localStorage／IndexedDB。v0.4.0 保留巴士到站／車牌功能，並加入泊車模式、DSAT 公開泊車資料、收藏、地圖、導航及一次性低空位 Web Push。
 
 可用以下指令執行完整本機驗證及兩個 viewport 的 Playwright smoke：
 
@@ -35,7 +41,7 @@ npm run verify
 npm run test:e2e
 ```
 
-`test:e2e` 會建置 production bundle，並以 Fastify 在 `http://127.0.0.1:4173` 提供測試頁面。正式公開前仍須重新評估 OSM tile provider 使用政策及以實體 iOS／Android 裝置驗證安裝更新與定位。
+`test:e2e` 會建置 production bundle，並以 Fastify 在 `http://127.0.0.1:4173` 提供測試頁面。正式公開前仍須重新評估 OSM tile provider 使用政策及以實體 iOS／Android 裝置驗證安裝更新、定位及關閉 PWA 後的 Web Push delivery。
 
 `data:sync` downloads exactly five files from the pinned `ChiHin-Lio/macau-bus-data` ref, normalizes them to `public/data/catalog.json`, and writes `public/data/provenance.json`. Set `MACAU_BUS_DATA_REF` to an audited commit when updating the source.
 

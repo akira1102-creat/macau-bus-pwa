@@ -5,3 +5,21 @@ functions = "netlify/functions"
 
 [functions]
 node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/parking"
+  to = "/.netlify/functions/parking"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/push/parking-alerts"
+  to = "/.netlify/functions/push-parking-alerts"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/push/parking-alerts/*"
+  to = "/.netlify/functions/push-parking-alerts/:splat"
+  status = 200
+  force = true

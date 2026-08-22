@@ -3,8 +3,26 @@ import { expect, test, type Page } from '@playwright/test';
 const REALTIME_UPDATED_AT = '2026-08-22T00:00:00.000Z';
 const ROUTE_PLATE = 'E2E-ROUTE-PLATE-001';
 const NEARBY_PLATE = 'E2E-NEARBY-PLATE-001';
+const PREFERENCES_KEY = 'macau-bus-pwa:preferences:v1';
 
 test.use({ serviceWorkers: 'block' });
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript((key) => {
+    if (!window.localStorage.getItem(key)) {
+      window.localStorage.setItem(key, JSON.stringify({
+        version: 3,
+        favorites: [],
+        recent: [],
+        theme: 'light',
+        notificationLeadStops: 3,
+        activeMode: 'bus',
+        parkingFavorites: [],
+        parkingAlertThreshold: 10,
+      }));
+    }
+  }, PREFERENCES_KEY);
+});
 
 async function mockRouteRealtime(page: Page, plate = ROUTE_PLATE): Promise<void> {
   await page.route('**/api/bus/realtime/1/**', async (route) => {

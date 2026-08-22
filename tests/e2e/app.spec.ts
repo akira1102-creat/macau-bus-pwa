@@ -5,10 +5,10 @@ const PREFERENCES_KEY = 'macau-bus-pwa:preferences:v1';
 test.describe('澳門巴士核心流程', () => {
   test('opens a route, switches direction, and preserves local preferences', async ({ page }) => {
     await page.addInitScript((key) => {
-      window.localStorage.setItem(key, JSON.stringify({ version: 1, favorites: ['1'], recent: ['1'], theme: 'light' }));
+      window.localStorage.setItem(key, JSON.stringify({ version: 3, favorites: ['1'], recent: ['1'], theme: 'light', notificationLeadStops: 3, activeMode: 'bus', parkingFavorites: [], parkingAlertThreshold: 10 }));
     }, PREFERENCES_KEY);
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: '澳門巴士' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '澳門實時巴士' })).toBeVisible();
 
     await page.getByRole('button', { name: '路線', exact: true }).click();
     await expect(page.getByRole('heading', { name: '所有路線' })).toBeVisible();
@@ -30,7 +30,7 @@ test.describe('澳門巴士核心流程', () => {
 
   test('keeps the app shell usable after an offline reload without clearing preferences', async ({ page, context }) => {
     await page.addInitScript((key) => {
-      window.localStorage.setItem(key, JSON.stringify({ version: 1, favorites: ['1'], recent: [], theme: 'light' }));
+      window.localStorage.setItem(key, JSON.stringify({ version: 3, favorites: ['1'], recent: [], theme: 'light', notificationLeadStops: 3, activeMode: 'bus', parkingFavorites: [], parkingAlertThreshold: 10 }));
     }, PREFERENCES_KEY);
     await page.goto('/');
     await page.waitForLoadState('networkidle');
@@ -38,7 +38,7 @@ test.describe('澳門巴士核心流程', () => {
     await context.setOffline(true);
     await page.reload();
 
-    await expect(page.getByRole('heading', { name: '澳門巴士' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '澳門實時巴士' })).toBeVisible();
     await expect.poll(async () => page.evaluate((key) => window.localStorage.getItem(key), PREFERENCES_KEY))
       .toContain('"favorites":["1"]');
     await context.setOffline(false);

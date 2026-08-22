@@ -21,9 +21,9 @@ export default defineConfig(({ mode }) => {
         includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png'],
         manifest: {
           id: base,
-          name: '澳門巴士',
-          short_name: '澳門巴士',
-          description: '澳門巴士路線、站點及即時觀測。',
+          name: '澳門實時巴士',
+          short_name: '澳門實時巴士',
+          description: '澳門巴士路線、站點、即時觀測及泊車位。',
           start_url: base,
           scope: base,
           display: 'standalone',

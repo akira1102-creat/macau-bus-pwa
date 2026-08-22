@@ -78,10 +78,10 @@ export const messages = {
   parkingFavorite: '收藏停車場',
   parkingNavigate: '導航',
   parkingAlert: '低空位提醒',
-  parkingAlertUnavailable: '低空位提醒會由後續背景通知功能提供。',
+  parkingAlertUnavailable: '低空位提醒需要已安裝的 PWA、通知權限及支援 Web Push 的瀏覽器。',
   parkingAlertThreshold: '低空位提醒門檻',
   parkingAlertThresholdCopy: '當私家車空位低於或等於此數值時提醒；只保存於此裝置。',
-  parkingSourceNote: '泊車資料來自 DSAT；地圖圖磚來自 OpenStreetMap。數值僅供參考。',
+  parkingSourceNote: '泊車資料來自 DSAT 公開實時介面；地圖圖磚來自 OpenStreetMap。數值可能延遲，僅供參考。',
   parkingPrivacyNote: '定位只在瀏覽器本機計算距離和排序，不會傳送至伺服器。',
 } as const;
 

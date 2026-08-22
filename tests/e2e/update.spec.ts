@@ -15,10 +15,10 @@ test.describe('real service-worker update handoff', () => {
 
     try {
       await page.addInitScript((key) => {
-        window.localStorage.setItem(key, JSON.stringify({ version: 1, favorites: ['1'], recent: ['1'], theme: 'light' }));
+        window.localStorage.setItem(key, JSON.stringify({ version: 3, favorites: ['1'], recent: ['1'], theme: 'light', notificationLeadStops: 3, activeMode: 'bus', parkingFavorites: [], parkingAlertThreshold: 10 }));
       }, preferencesKey);
       await page.goto(fixtureServer.url);
-      await expect(page.getByRole('heading', { name: '澳門巴士' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '澳門實時巴士' })).toBeVisible();
       await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller), { timeout: 15_000 });
       const navigationsBeforeUpdate = mainFrameNavigations;
 

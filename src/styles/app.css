@@ -527,7 +527,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible {
 .catalog-state code { width: max-content; padding: 8px 10px; border: 1px solid var(--color-divider); border-radius: 8px; color: var(--color-jade-dark); background: var(--color-surface); }
 
 .app-mode-switch { display: inline-flex; align-items: center; gap: 2px; margin-left: 8px; padding: 2px; border: 1px solid var(--color-divider); border-radius: 999px; background: var(--color-surface); }
-.app-mode-switch button { min-height: 34px; padding: 3px 8px; border: 0; border-radius: 999px; background: transparent; color: var(--color-muted); font-size: 0.78rem; }
+.app-mode-switch button { min-width: 48px; min-height: 44px; padding: 3px 8px; border: 0; border-radius: 999px; background: transparent; color: var(--color-muted); font-size: 0.78rem; }
 .app-mode-switch button.is-selected { background: var(--color-jade-soft); color: var(--color-jade-dark); font-weight: 700; }
 .app-mode-switch-detail { width: max-content; margin: calc(12px + env(safe-area-inset-top)) auto 0; }
 
